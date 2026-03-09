@@ -3,6 +3,7 @@ import { useAuth } from './core/hooks/useAuth'
 import ProtectedRoute from './core/components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './modules/pilotage/Dashboard'
+import Ressources from './modules/ressources/Ressources'
 
 function App() {
   const { user, loading } = useAuth()
@@ -41,6 +42,15 @@ function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/ressources"
+        element={
+          <ProtectedRoute>
+            <Ressources />
           </ProtectedRoute>
         }
       />

@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, Area, AreaChart, ComposedChart, ReferenceLine
+  ResponsiveContainer, ComposedChart, ReferenceLine
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, 
   DollarSign, Percent, PiggyBank, FileText, ChevronRight,
-  ArrowUpRight, ArrowDownRight, Minus, Building2, Users,
-  Clock, RefreshCw, Settings, Download, BarChart3, History
+  ArrowUpRight, ArrowDownRight, Building2, Users,
+  RefreshCw, Settings, Download, BarChart3, History, Loader2
 } from 'lucide-react';
+import { useConsultants } from '../../core/hooks/useConsultants';
 
-// ============ DONNÉES HISTORIQUES (bilans) ============
+// ============ DONNÉES HISTORIQUES (bilans comptables) ============
 const HISTORICAL_DATA = {
   2023: {
     periode: "22/08/2022 - 31/12/2023",
@@ -19,7 +20,6 @@ const HISTORICAL_DATA = {
     achats_freelances: 1310843,
     marge_brute: 271478,
     taux_marge: 17.2,
-    charges_externes: 0, // inclus dans achats
     salaires: 89834,
     charges_sociales: 30712,
     resultat_exploitation: 149833,
@@ -36,7 +36,6 @@ const HISTORICAL_DATA = {
     achats_freelances: 1427662,
     marge_brute: 115841,
     taux_marge: 7.5,
-    charges_externes: 29000,
     salaires: 50571,
     charges_sociales: 22052,
     resultat_exploitation: 40779,
@@ -64,8 +63,10 @@ const getAnnualizedData = (year) => {
 // ============ COMPOSANT PRINCIPAL ============
 const DashboardV2 = () => {
   const [activeTab, setActiveTab] = useState('global');
-  const [selectedYear, setSelectedYear] = useState('Q1 2026');
   const [showSettings, setShowSettings] = useState(false);
+  
+  // ⬇️ CONNEXION SUPABASE - Récupère les vraies données
+  const { consultants, missions, joursTravailles, loading, error, refresh } = useConsultants();
   
   // Paramètres
   const [settings, setSettings] = useState({
@@ -75,23 +76,34 @@ const DashboardV2 = () => {
     seuilAlerteFin: 30
   });
 
-  // Données missions (simulées - normalement depuis useConsultants)
-  const missions = [
-    { id: 1, consultant: "Junaid Jabbar", client: "HORSE", tjm_achat: 550, tjm_vente: 620, date_fin: "2026-04-15", statut: "active" },
-    { id: 2, consultant: "Rupam Mandal", client: "ACCENTURE", tjm_achat: 660, tjm_vente: 730, date_fin: "2026-05-30", statut: "active" },
-    { id: 3, consultant: "Salim CISSE", client: "SAE", tjm_achat: 450, tjm_vente: 630, date_fin: "2026-06-30", statut: "active" },
-    { id: 4, consultant: "Naoufal HADI", client: "VALEO", tjm_achat: 875, tjm_vente: 1000, date_fin: "2026-03-31", statut: "active" },
-    { id: 5, consultant: "Anas EL HABRI", client: "ACCENTURE", tjm_achat: 750, tjm_vente: 820, date_fin: "2026-07-31", statut: "active" },
-    { id: 6, consultant: "Annasalman CHEICK ISMAIL", client: "ACCENTURE", tjm_achat: 760, tjm_vente: 800, date_fin: "2026-04-30", statut: "active" },
-    { id: 7, consultant: "MODOU KANE ElHadj", client: "BOULANGER", tjm_achat: 727, tjm_vente: 765, date_fin: "2026-03-20", statut: "active" },
-    { id: 8, consultant: "Abourakhmanne DIABATE", client: "SAE", tjm_achat: 550, tjm_vente: 680, date_fin: "2026-08-31", statut: "active" },
-    { id: 9, consultant: "Serge", client: "SAE", tjm_achat: 725, tjm_vente: 800, date_fin: "2026-05-15", statut: "active" },
-    { id: 10, consultant: "Galo KA", client: "PROFROID", tjm_achat: 500, tjm_vente: 600, date_fin: "2026-06-30", statut: "active" }
-  ];
-
-  // Calculs
+  // Calculs basés sur les données Supabase
   const calculations = useMemo(() => {
-    const activeMissions = missions.filter(m => m.statut === 'active');
+    if (!missions || missions.length === 0) {
+      return {
+        totalMargeJour: 0,
+        margeMensuelle: 0,
+        margeAnnuelle: 0,
+        avgMarkup: 0,
+        nbConsultants: 0,
+        alertesMarkup: [],
+        alertesFin: []
+      };
+    }
+
+    const activeMissions = missions.filter(m => m.statut === 'active' || m.statut === 'en_cours');
+    
+    if (activeMissions.length === 0) {
+      return {
+        totalMargeJour: 0,
+        margeMensuelle: 0,
+        margeAnnuelle: 0,
+        avgMarkup: 0,
+        nbConsultants: 0,
+        alertesMarkup: [],
+        alertesFin: []
+      };
+    }
+
     const totalMargeJour = activeMissions.reduce((sum, m) => sum + (m.tjm_vente - m.tjm_achat), 0);
     const avgMarkup = activeMissions.reduce((sum, m) => sum + ((m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100), 0) / activeMissions.length;
     
@@ -99,18 +111,31 @@ const DashboardV2 = () => {
     const alertesMarkup = activeMissions.filter(m => {
       const markup = (m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100;
       return markup < settings.seuilMarkupAlerte;
+    }).map(m => {
+      const consultant = consultants?.find(c => c.id === m.consultant_id);
+      return {
+        ...m,
+        consultantNom: consultant ? `${consultant.prenom} ${consultant.nom}` : 'Inconnu',
+        markup: ((m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100)
+      };
     });
 
     // Alertes fin de mission
     const today = new Date();
     const alertesFin = activeMissions.filter(m => {
+      if (!m.date_fin) return false;
       const dateFin = new Date(m.date_fin);
       const joursRestants = Math.ceil((dateFin - today) / (1000 * 60 * 60 * 24));
       return joursRestants <= settings.seuilAlerteFin && joursRestants > 0;
     }).map(m => {
       const dateFin = new Date(m.date_fin);
       const joursRestants = Math.ceil((dateFin - today) / (1000 * 60 * 60 * 24));
-      return { ...m, joursRestants };
+      const consultant = consultants?.find(c => c.id === m.consultant_id);
+      return { 
+        ...m, 
+        joursRestants,
+        consultantNom: consultant ? `${consultant.prenom} ${consultant.nom}` : 'Inconnu'
+      };
     }).sort((a, b) => a.joursRestants - b.joursRestants);
 
     return {
@@ -122,24 +147,61 @@ const DashboardV2 = () => {
       alertesMarkup,
       alertesFin
     };
-  }, [missions, settings]);
+  }, [missions, consultants, settings]);
 
-  // Projection 2025/2026
+  // Projection 2025/2026 basée sur données Supabase
   const projection2025 = useMemo(() => {
-    // Basée sur les missions actuelles
-    const margeMensuelle = calculations.margeMensuelle;
-    const caEstime = missions.reduce((sum, m) => sum + m.tjm_vente * 20 * 12, 0);
-    const achatsEstimes = missions.reduce((sum, m) => sum + m.tjm_achat * 20 * 12, 0);
+    if (!missions || missions.length === 0) {
+      return { ca: 0, marge_brute: 0, taux_marge: 0, resultat_net: 0 };
+    }
+
+    const activeMissions = missions.filter(m => m.statut === 'active' || m.statut === 'en_cours');
+    const caEstime = activeMissions.reduce((sum, m) => sum + (m.tjm_vente || 0) * 20 * 12, 0);
+    const achatsEstimes = activeMissions.reduce((sum, m) => sum + (m.tjm_achat || 0) * 20 * 12, 0);
     const margeEstimee = caEstime - achatsEstimes;
-    const tauxMargeEstime = (margeEstimee / caEstime) * 100;
+    const tauxMargeEstime = caEstime > 0 ? (margeEstimee / caEstime) * 100 : 0;
     
     return {
       ca: caEstime,
       marge_brute: margeEstimee,
       taux_marge: tauxMargeEstime,
-      resultat_net: margeEstimee * 0.4, // estimation après charges
+      resultat_net: margeEstimee * 0.4,
     };
-  }, [missions, calculations]);
+  }, [missions]);
+
+  // ============ UTILITAIRES ============
+  const formatMontant = (montant) => {
+    if (montant === null || montant === undefined) return '-';
+    if (montant >= 1000000) {
+      return `${(montant / 1000000).toFixed(2)}M€`;
+    }
+    if (montant >= 1000) {
+      return `${(montant / 1000).toFixed(0)}K€`;
+    }
+    return `${Math.round(montant)}€`;
+  };
+
+  // ============ COMPOSANT KPI ============
+  const KPICard = ({ title, value, evolution, subtitle, icon, evolutionSuffix = '%', alert = false }) => (
+    <div className={`bg-slate-800/50 rounded-xl p-4 border ${alert ? 'border-red-500/50' : 'border-slate-700'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-slate-400 text-sm">{title}</span>
+        <div className={`p-2 rounded-lg ${alert ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300'}`}>
+          {icon}
+        </div>
+      </div>
+      <div className={`text-2xl font-bold ${alert ? 'text-red-400' : 'text-white'}`}>{value}</div>
+      <div className="flex items-center gap-2 mt-1">
+        {evolution && (
+          <span className={`text-sm flex items-center gap-1 ${evolution.isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+            {evolution.isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+            {evolution.isPositive ? '+' : ''}{evolution.value.toFixed(1)}{evolutionSuffix}
+          </span>
+        )}
+        <span className="text-slate-500 text-xs">{subtitle}</span>
+      </div>
+    </div>
+  );
 
   // ============ ONGLET HISTORIQUE ============
   const HistoriqueTab = () => {
@@ -174,7 +236,6 @@ const DashboardV2 = () => {
     const generateAnalysis = () => {
       const analyses = [];
       
-      // Analyse taux de marge
       if (data2024.taux_marge < 10) {
         analyses.push({
           type: 'warning',
@@ -184,38 +245,34 @@ const DashboardV2 = () => {
         });
       }
 
-      // Analyse CA
       if (evolCA.value > 20) {
         analyses.push({
           type: 'success',
           title: 'Forte croissance du CA',
-          text: `Le CA annualisé a progressé de +${evolCA.value.toFixed(0)}% entre 2023 et 2024, signe d'une bonne dynamique commerciale et d'un développement du portefeuille clients.`,
+          text: `Le CA annualisé a progressé de +${evolCA.value.toFixed(0)}% entre 2023 et 2024, signe d'une bonne dynamique commerciale.`,
           action: 'Maintenir cette dynamique tout en améliorant les marges.'
         });
       }
 
-      // Analyse trésorerie
       const evolTreso = evol(data2024.tresorerie, data2023.tresorerie);
       if (evolTreso.value < -50) {
         analyses.push({
           type: 'warning',
           title: 'Trésorerie en baisse',
-          text: `La trésorerie a diminué de ${evolTreso.value.toFixed(0)}% (${formatMontant(data2023.tresorerie)} → ${formatMontant(data2024.tresorerie)}). Cela s'explique par le financement du BFR lié à la croissance.`,
+          text: `La trésorerie a diminué de ${Math.abs(evolTreso.value).toFixed(0)}% (${formatMontant(data2023.tresorerie)} → ${formatMontant(data2024.tresorerie)}).`,
           action: 'Réduire le DSO (relances à J+15, J+30) et négocier des acomptes clients.'
         });
       }
 
-      // Analyse résultat
       if (evolResultat.value < -50) {
         analyses.push({
           type: 'danger',
           title: 'Résultat net en forte baisse',
-          text: `Le résultat net a chuté de ${Math.abs(evolResultat.value).toFixed(0)}% malgré une activité stable. La compression des marges impacte directement la rentabilité.`,
+          text: `Le résultat net a chuté de ${Math.abs(evolResultat.value).toFixed(0)}% malgré une activité stable.`,
           action: 'Priorité absolue : remonter le taux de marge à minimum 12-15%.'
         });
       }
 
-      // Projection positive
       if (projection2025.taux_marge > data2024.taux_marge) {
         analyses.push({
           type: 'info',
@@ -229,6 +286,45 @@ const DashboardV2 = () => {
     };
 
     const analyses = generateAnalysis();
+
+    // Tableau Row
+    const TableRow = ({ label, val2023, val2023Ann, val2024, val2025, highlight = false }) => {
+      const evolVal = val2023Ann && val2024 ? ((val2024 - val2023Ann) / val2023Ann * 100) : null;
+      return (
+        <tr className={`border-b border-slate-700/50 ${highlight ? 'bg-slate-700/20' : ''}`}>
+          <td className="py-3 px-4 text-slate-300">{label}</td>
+          <td className="py-3 px-4 text-right text-slate-400">{formatMontant(val2023)}</td>
+          <td className="py-3 px-4 text-right text-slate-300">{formatMontant(val2023Ann)}</td>
+          <td className="py-3 px-4 text-right font-medium">{formatMontant(val2024)}</td>
+          <td className="py-3 px-4 text-right">
+            {evolVal !== null && (
+              <span className={`${evolVal >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {evolVal >= 0 ? '+' : ''}{evolVal.toFixed(0)}%
+              </span>
+            )}
+          </td>
+          <td className="py-3 px-4 text-right text-violet-400">{formatMontant(val2025)}</td>
+        </tr>
+      );
+    };
+
+    const TableRowPercent = ({ label, val2023, val2024, val2025, alert = false }) => {
+      const evolVal = val2024 - val2023;
+      return (
+        <tr className={`border-b border-slate-700/50 ${alert ? 'bg-red-500/10' : ''}`}>
+          <td className="py-3 px-4 text-slate-300">{label}</td>
+          <td className="py-3 px-4 text-right text-slate-400">{val2023}%</td>
+          <td className="py-3 px-4 text-right text-slate-300">{val2023}%</td>
+          <td className={`py-3 px-4 text-right font-medium ${alert ? 'text-red-400' : ''}`}>{val2024}%</td>
+          <td className="py-3 px-4 text-right">
+            <span className={`${evolVal >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {evolVal >= 0 ? '+' : ''}{evolVal.toFixed(1)} pts
+            </span>
+          </td>
+          <td className="py-3 px-4 text-right text-violet-400">{val2025.toFixed(1)}%</td>
+        </tr>
+      );
+    };
 
     return (
       <div className="space-y-6">
@@ -440,13 +536,13 @@ const DashboardV2 = () => {
         <div className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 rounded-xl p-6 border border-violet-500/30">
           <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Target className="w-5 h-5 text-violet-400" />
-            Projection 2025 (basée sur missions actuelles)
+            Projection 2025 (basée sur {missions?.filter(m => m.statut === 'active' || m.statut === 'en_cours').length || 0} missions actives)
           </h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-slate-800/50 rounded-lg p-4">
               <div className="text-slate-400 text-sm">CA estimé</div>
               <div className="text-2xl font-bold text-white">{formatMontant(projection2025.ca)}</div>
-              <div className="text-xs text-slate-500">{missions.length} consultants × 218j</div>
+              <div className="text-xs text-slate-500">218 jours/an</div>
             </div>
             <div className="bg-slate-800/50 rounded-lg p-4">
               <div className="text-slate-400 text-sm">Marge brute estimée</div>
@@ -467,85 +563,14 @@ const DashboardV2 = () => {
             </div>
           </div>
           <div className="mt-4 p-3 bg-slate-800/30 rounded-lg text-sm text-slate-400">
-            💡 Cette projection suppose que toutes les missions actuelles continuent sur 12 mois avec les TJM actuels.
+            💡 Cette projection est calculée à partir des missions saisies dans le module Ressources.
           </div>
         </div>
       </div>
     );
   };
 
-  // ============ COMPOSANTS UTILITAIRES ============
-  const formatMontant = (montant) => {
-    if (montant === null || montant === undefined) return '-';
-    if (montant >= 1000000) {
-      return `${(montant / 1000000).toFixed(2)}M€`;
-    }
-    if (montant >= 1000) {
-      return `${(montant / 1000).toFixed(0)}K€`;
-    }
-    return `${montant.toFixed(0)}€`;
-  };
-
-  const KPICard = ({ title, value, evolution, subtitle, icon, evolutionSuffix = '%', alert = false }) => (
-    <div className={`bg-slate-800/50 rounded-xl p-4 border ${alert ? 'border-red-500/50' : 'border-slate-700'}`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-slate-400 text-sm">{title}</span>
-        <div className={`p-2 rounded-lg ${alert ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300'}`}>
-          {icon}
-        </div>
-      </div>
-      <div className={`text-2xl font-bold ${alert ? 'text-red-400' : 'text-white'}`}>{value}</div>
-      <div className="flex items-center gap-2 mt-1">
-        {evolution && (
-          <span className={`text-sm flex items-center gap-1 ${evolution.isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-            {evolution.isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-            {evolution.isPositive ? '+' : ''}{evolution.value.toFixed(1)}{evolutionSuffix}
-          </span>
-        )}
-        <span className="text-slate-500 text-xs">{subtitle}</span>
-      </div>
-    </div>
-  );
-
-  const TableRow = ({ label, val2023, val2023Ann, val2024, val2025, highlight = false }) => {
-    const evol = val2023Ann && val2024 ? ((val2024 - val2023Ann) / val2023Ann * 100) : null;
-    return (
-      <tr className={`border-b border-slate-700/50 ${highlight ? 'bg-slate-700/20' : ''}`}>
-        <td className="py-3 px-4 text-slate-300">{label}</td>
-        <td className="py-3 px-4 text-right text-slate-400">{formatMontant(val2023)}</td>
-        <td className="py-3 px-4 text-right text-slate-300">{formatMontant(val2023Ann)}</td>
-        <td className="py-3 px-4 text-right font-medium">{formatMontant(val2024)}</td>
-        <td className="py-3 px-4 text-right">
-          {evol !== null && (
-            <span className={`${evol >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {evol >= 0 ? '+' : ''}{evol.toFixed(0)}%
-            </span>
-          )}
-        </td>
-        <td className="py-3 px-4 text-right text-violet-400">{formatMontant(val2025)}</td>
-      </tr>
-    );
-  };
-
-  const TableRowPercent = ({ label, val2023, val2024, val2025, alert = false }) => {
-    const evol = val2024 - val2023;
-    return (
-      <tr className={`border-b border-slate-700/50 ${alert ? 'bg-red-500/10' : ''}`}>
-        <td className="py-3 px-4 text-slate-300">{label}</td>
-        <td className="py-3 px-4 text-right text-slate-400">{val2023}%</td>
-        <td className="py-3 px-4 text-right text-slate-300">{val2023}%</td>
-        <td className={`py-3 px-4 text-right font-medium ${alert ? 'text-red-400' : ''}`}>{val2024}%</td>
-        <td className="py-3 px-4 text-right">
-          <span className={`${evol >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {evol >= 0 ? '+' : ''}{evol.toFixed(1)} pts
-          </span>
-        </td>
-        <td className="py-3 px-4 text-right text-violet-400">{val2025.toFixed(1)}%</td>
-      </tr>
-    );
-  };
-
-  // ============ ONGLET VUE GLOBALE (simplifié) ============
+  // ============ ONGLET VUE GLOBALE ============
   const VueGlobaleTab = () => (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -581,7 +606,7 @@ const DashboardV2 = () => {
           <div className="space-y-2">
             {calculations.alertesFin.map((m, i) => (
               <div key={i} className="flex items-center justify-between text-sm bg-slate-800/50 rounded-lg p-2">
-                <span className="text-white">{m.consultant} - {m.client}</span>
+                <span className="text-white">{m.consultantNom} - {m.client}</span>
                 <span className={`px-2 py-1 rounded text-xs font-medium ${
                   m.joursRestants <= 7 ? 'bg-red-500/20 text-red-400' :
                   m.joursRestants <= 15 ? 'bg-orange-500/20 text-orange-400' :
@@ -593,19 +618,128 @@ const DashboardV2 = () => {
             ))}
             {calculations.alertesMarkup.map((m, i) => (
               <div key={`m-${i}`} className="flex items-center justify-between text-sm bg-slate-800/50 rounded-lg p-2">
-                <span className="text-white">{m.consultant} - {m.client}</span>
+                <span className="text-white">{m.consultantNom} - {m.client}</span>
                 <span className="px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400">
-                  Markup {((m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100).toFixed(1)}%
+                  Markup {m.markup.toFixed(1)}%
                 </span>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Message si pas de données */}
+      {calculations.nbConsultants === 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-8 border border-slate-700 text-center">
+          <Users className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-white mb-2">Aucune mission active</h3>
+          <p className="text-slate-400 mb-4">Ajoutez des consultants et missions dans le module Ressources.</p>
+          <a href="/ressources" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm transition-colors">
+            Aller aux Ressources
+            <ChevronRight className="w-4 h-4" />
+          </a>
+        </div>
+      )}
+    </div>
+  );
+
+  // ============ ONGLET ALERTES ============
+  const AlertesTab = () => (
+    <div className="space-y-6">
+      {/* Alertes fin de mission */}
+      <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Calendar className="w-5 h-5 text-amber-400" />
+          Missions à renouveler ({calculations.alertesFin.length})
+        </h3>
+        {calculations.alertesFin.length > 0 ? (
+          <div className="space-y-2">
+            {calculations.alertesFin.map((m, i) => (
+              <div key={i} className="flex items-center justify-between bg-slate-700/50 rounded-lg p-3">
+                <div>
+                  <div className="text-white font-medium">{m.consultantNom}</div>
+                  <div className="text-slate-400 text-sm">{m.client}</div>
+                </div>
+                <div className="text-right">
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    m.joursRestants <= 7 ? 'bg-red-500/20 text-red-400' :
+                    m.joursRestants <= 15 ? 'bg-orange-500/20 text-orange-400' :
+                    'bg-amber-500/20 text-amber-400'
+                  }`}>
+                    {m.joursRestants} jours
+                  </div>
+                  <div className="text-slate-500 text-xs mt-1">
+                    Fin le {new Date(m.date_fin).toLocaleDateString('fr-FR')}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-400">Aucune mission à renouveler dans les {settings.seuilAlerteFin} prochains jours.</p>
+        )}
+      </div>
+
+      {/* Alertes markup */}
+      <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <TrendingDown className="w-5 h-5 text-red-400" />
+          Markup insuffisant ({calculations.alertesMarkup.length})
+        </h3>
+        {calculations.alertesMarkup.length > 0 ? (
+          <div className="space-y-2">
+            {calculations.alertesMarkup.map((m, i) => (
+              <div key={i} className="flex items-center justify-between bg-slate-700/50 rounded-lg p-3">
+                <div>
+                  <div className="text-white font-medium">{m.consultantNom}</div>
+                  <div className="text-slate-400 text-sm">{m.client}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-red-400 font-medium">{m.markup.toFixed(1)}%</div>
+                  <div className="text-slate-500 text-xs">
+                    {m.tjm_achat}€ → {m.tjm_vente}€
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-400">Toutes les missions ont un markup supérieur à {settings.seuilMarkupAlerte}%.</p>
+        )}
+      </div>
     </div>
   );
 
   // ============ RENDU PRINCIPAL ============
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
+          <p className="text-slate-400">Chargement des données...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center bg-red-500/10 border border-red-500/30 rounded-xl p-6 max-w-md">
+          <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-white mb-2">Erreur de chargement</h2>
+          <p className="text-slate-400 mb-4">{error}</p>
+          <button 
+            onClick={refresh}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-colors"
+          >
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
       <div className="max-w-7xl mx-auto">
@@ -616,7 +750,10 @@ const DashboardV2 = () => {
             <p className="text-slate-400 text-sm">Données temps réel depuis Ressources</p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm transition-colors">
+            <button 
+              onClick={refresh}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm transition-colors"
+            >
               <RefreshCw className="w-4 h-4" />
               Actualiser
             </button>
@@ -638,7 +775,6 @@ const DashboardV2 = () => {
           {[
             { id: 'global', label: 'Vue globale', icon: <BarChart3 className="w-4 h-4" /> },
             { id: 'historique', label: 'Historique', icon: <History className="w-4 h-4" /> },
-            { id: 'missions', label: 'Missions', icon: <Users className="w-4 h-4" /> },
             { id: 'alertes', label: `Alertes (${calculations.alertesMarkup.length + calculations.alertesFin.length})`, icon: <AlertTriangle className="w-4 h-4" /> },
           ].map(tab => (
             <button
@@ -659,20 +795,11 @@ const DashboardV2 = () => {
         {/* Contenu */}
         {activeTab === 'global' && <VueGlobaleTab />}
         {activeTab === 'historique' && <HistoriqueTab />}
-        {activeTab === 'missions' && (
-          <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
-            <p className="text-slate-400">Onglet Missions - à venir</p>
-          </div>
-        )}
-        {activeTab === 'alertes' && (
-          <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
-            <p className="text-slate-400">Onglet Alertes détaillé - à venir</p>
-          </div>
-        )}
+        {activeTab === 'alertes' && <AlertesTab />}
 
         {/* Footer */}
         <div className="mt-8 text-center text-slate-500 text-sm">
-          Solensoft Consulting • Données historiques 2023-2024 • Temps réel
+          Solensoft Consulting • Données historiques 2023-2024 + Temps réel Supabase
         </div>
       </div>
     </div>

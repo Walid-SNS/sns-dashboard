@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, ReferenceLine, Legend, Area } from 'recharts';
-import { TrendingUp, Users, AlertTriangle, Target, Calendar, Building2, Euro, FileDown, Calculator, X, Check, Settings, ArrowUpRight, ArrowDownRight, Minus, RefreshCw } from 'lucide-react';
+import { TrendingUp, Users, AlertTriangle, Target, Calendar, Building2, Euro, FileDown, Calculator, X, Check, Settings, ArrowUpRight, ArrowDownRight, Minus, RefreshCw, Clock } from 'lucide-react';
 import Navigation from '../../core/components/Navigation';
 import { useConsultants } from '../../core/hooks/useConsultants';
 
@@ -35,6 +35,7 @@ export default function DashboardV2() {
     objectifMargeAnnuelle: 150000,
     seuilMarkupAlerte: 10,
     seuilConcentrationClient: 30,
+    seuilFinMissionJours: 30,
     anneeEnCours: 2026
   });
 
@@ -290,6 +291,23 @@ export default function DashboardV2() {
       .map(c => ({ ...c, markupMoyen: c.missions > 0 ? c.markupTotal / c.missions : 0 }))
       .sort((a, b) => b.marge - a.marge);
 
+    // Missions à renouveler (fin dans les X prochains jours)
+    const today = new Date();
+    const missionsARenouveler = missionsData
+      .filter(m => {
+        if (m.statut !== 'Actif') return false;
+        const finMission = parseDate(m.fin);
+        if (!finMission) return false;
+        const joursRestants = Math.ceil((finMission - today) / (1000 * 60 * 60 * 24));
+        return joursRestants >= 0 && joursRestants <= settings.seuilFinMissionJours;
+      })
+      .map(m => {
+        const finMission = parseDate(m.fin);
+        const joursRestants = Math.ceil((finMission - today) / (1000 * 60 * 60 * 24));
+        return { ...m, joursRestants, dateFin: finMission };
+      })
+      .sort((a, b) => a.joursRestants - b.joursRestants);
+
     return {
       ...currentData,
       previousPeriod,
@@ -297,6 +315,7 @@ export default function DashboardV2() {
       evolutions,
       monthsData,
       clientsArray,
+      missionsARenouveler,
       isYearView
     };
   }, [missionsData, selectedPeriod, settings]);
@@ -559,7 +578,7 @@ export default function DashboardV2() {
             { id: 'prediction', label: '📈 Projection' },
             { id: 'missions', label: '👥 Missions' },
             { id: 'clients', label: '🏢 Clients' },
-            { id: 'alerts', label: `⚠️ Alertes (${filteredData?.stats.nbAlertes || 0})` },
+            { id: 'alerts', label: `⚠️ Alertes (${(filteredData?.stats.nbAlertes || 0) + (filteredData?.missionsARenouveler?.length || 0)})` },
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all text-sm ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'}`}>
               {tab.label}
@@ -599,6 +618,15 @@ export default function DashboardV2() {
                     <input type="number" value={settings.seuilConcentrationClient} onChange={(e) => setSettings({ ...settings, seuilConcentrationClient: parseFloat(e.target.value) || 0 })} className="w-24 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
                     <span className="text-slate-400">%</span>
                   </div>
+                </div>
+                
+                <div>
+                  <label className="block text-slate-400 text-sm mb-2">📅 Alerte fin de mission</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={settings.seuilFinMissionJours} onChange={(e) => setSettings({ ...settings, seuilFinMissionJours: parseInt(e.target.value) || 30 })} className="w-24 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
+                    <span className="text-slate-400">jours</span>
+                  </div>
+                  <p className="text-slate-500 text-xs mt-1">Alerter si mission se termine dans moins de X jours</p>
                 </div>
               </div>
 
@@ -658,12 +686,13 @@ export default function DashboardV2() {
             {/* Overview Tab */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
                   <KPICard title={filteredData.isYearView ? "Marge année" : "Marge période"} value={`${(filteredData.stats.totalMarge/1000).toFixed(1)}K€`} icon={Euro} evolution={filteredData.evolutions?.marge} evolutionLabel="%" />
                   <KPICard title="Markup moyen" value={`${filteredData.stats.markupMoyen.toFixed(1)}%`} subtitle={`Objectif: ${settings.seuilMarkupAlerte}%`} icon={Target} evolution={filteredData.evolutions?.markup ? { value: filteredData.evolutions.markup.value } : null} evolutionLabel=" pts" />
                   <KPICard title="Missions" value={filteredData.stats.nbMissions} subtitle={`${filteredData.stats.nbConsultants} consultants`} icon={Users} evolution={filteredData.evolutions?.missions} evolutionLabel="%" />
                   <KPICard title="Concentration" value={`${filteredData.stats.concentrationClient.toFixed(0)}%`} subtitle={filteredData.stats.topClient} icon={Building2} alert={filteredData.stats.concentrationClient > settings.seuilConcentrationClient} />
-                  <KPICard title="Alertes" value={filteredData.stats.nbAlertes} subtitle={`< ${settings.seuilMarkupAlerte}% markup`} icon={AlertTriangle} alert={filteredData.stats.nbAlertes > 0} onClick={() => setActiveTab('alerts')} />
+                  <KPICard title="Alertes markup" value={filteredData.stats.nbAlertes} subtitle={`< ${settings.seuilMarkupAlerte}%`} icon={AlertTriangle} alert={filteredData.stats.nbAlertes > 0} onClick={() => setActiveTab('alerts')} />
+                  <KPICard title="À renouveler" value={filteredData.missionsARenouveler?.length || 0} subtitle={`< ${settings.seuilFinMissionJours}j`} icon={Clock} alert={(filteredData.missionsARenouveler?.length || 0) > 0} onClick={() => setActiveTab('alerts')} />
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -849,35 +878,86 @@ export default function DashboardV2() {
 
             {/* Alerts Tab */}
             {activeTab === 'alerts' && (
-              <div className="space-y-4">
-                {filteredData.alertes.length === 0 ? (
-                  <div className="bg-slate-800/50 rounded-2xl p-12 text-center border border-slate-700/50">
-                    <Check className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold">Aucune alerte</h3>
-                    <p className="text-slate-400">Toutes les missions sont au-dessus de {settings.seuilMarkupAlerte}%</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="bg-red-900/20 rounded-2xl p-4 border border-red-500/30">
-                      <p className="text-red-400 font-medium">{filteredData.alertes.length} mission(s) sous {settings.seuilMarkupAlerte}% de markup</p>
+              <div className="space-y-6">
+                {/* Section Missions à renouveler */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-orange-400" />
+                    Missions à renouveler
+                    <span className="text-sm font-normal text-slate-400">(fin dans moins de {settings.seuilFinMissionJours} jours)</span>
+                  </h3>
+                  
+                  {(!filteredData.missionsARenouveler || filteredData.missionsARenouveler.length === 0) ? (
+                    <div className="bg-slate-800/50 rounded-2xl p-8 text-center border border-slate-700/50">
+                      <Check className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+                      <p className="text-slate-400">Aucune mission à renouveler prochainement</p>
                     </div>
-                    {filteredData.alertes.sort((a, b) => a.markup - b.markup).map(m => (
-                      <div key={m.id} className="bg-slate-800/50 rounded-xl p-4 border border-red-500/30 flex items-center justify-between">
-                        <div>
-                          <p className="font-medium">{m.consultant}</p>
-                          <p className="text-slate-400 text-sm">{m.client}</p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-center">
-                            <p className="text-red-400 text-xl font-bold">{m.markup.toFixed(1)}%</p>
-                            <p className="text-slate-500 text-xs">markup</p>
-                          </div>
-                          <button onClick={() => openSimulator(m)} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Simuler</button>
-                        </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-orange-900/20 rounded-2xl p-4 border border-orange-500/30">
+                        <p className="text-orange-400 font-medium">⚠️ {filteredData.missionsARenouveler.length} mission(s) se termine(nt) bientôt</p>
                       </div>
-                    ))}
-                  </>
-                )}
+                      {filteredData.missionsARenouveler.map(m => (
+                        <div key={m.id} className={`bg-slate-800/50 rounded-xl p-4 border flex items-center justify-between ${m.joursRestants <= 7 ? 'border-red-500/50' : m.joursRestants <= 15 ? 'border-orange-500/30' : 'border-yellow-500/30'}`}>
+                          <div>
+                            <p className="font-medium">{m.consultant}</p>
+                            <p className="text-slate-400 text-sm">{m.client}</p>
+                            <p className="text-slate-500 text-xs mt-1">Fin : {m.dateFin?.toLocaleDateString('fr-FR')}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-center">
+                              <p className={`text-2xl font-bold ${m.joursRestants <= 7 ? 'text-red-400' : m.joursRestants <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                {m.joursRestants}
+                              </p>
+                              <p className="text-slate-500 text-xs">jours</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-lg font-semibold text-white">{m.margeJour}€</p>
+                              <p className="text-slate-500 text-xs">marge/j</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section Alertes Markup */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                    Alertes markup
+                    <span className="text-sm font-normal text-slate-400">(sous {settings.seuilMarkupAlerte}%)</span>
+                  </h3>
+                  
+                  {filteredData.alertes.length === 0 ? (
+                    <div className="bg-slate-800/50 rounded-2xl p-8 text-center border border-slate-700/50">
+                      <Check className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+                      <p className="text-slate-400">Toutes les missions sont au-dessus de {settings.seuilMarkupAlerte}%</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-red-900/20 rounded-2xl p-4 border border-red-500/30">
+                        <p className="text-red-400 font-medium">{filteredData.alertes.length} mission(s) sous {settings.seuilMarkupAlerte}% de markup</p>
+                      </div>
+                      {filteredData.alertes.sort((a, b) => a.markup - b.markup).map(m => (
+                        <div key={m.id} className="bg-slate-800/50 rounded-xl p-4 border border-red-500/30 flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{m.consultant}</p>
+                            <p className="text-slate-400 text-sm">{m.client}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-center">
+                              <p className="text-red-400 text-xl font-bold">{m.markup.toFixed(1)}%</p>
+                              <p className="text-slate-500 text-xs">markup</p>
+                            </div>
+                            <button onClick={() => openSimulator(m)} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Simuler</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </>

@@ -1,973 +1,682 @@
 import React, { useState, useMemo } from 'react';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, ReferenceLine, Legend, Area } from 'recharts';
-import { TrendingUp, Users, AlertTriangle, Target, Calendar, Building2, Euro, FileDown, Calculator, X, Check, Settings, ArrowUpRight, ArrowDownRight, Minus, RefreshCw, Clock } from 'lucide-react';
-import Navigation from '../../core/components/Navigation';
-import { useConsultants } from '../../core/hooks/useConsultants';
+import { 
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
+  ResponsiveContainer, Area, AreaChart, ComposedChart, ReferenceLine
+} from 'recharts';
+import { 
+  TrendingUp, TrendingDown, AlertTriangle, Target, Calendar, 
+  DollarSign, Percent, PiggyBank, FileText, ChevronRight,
+  ArrowUpRight, ArrowDownRight, Minus, Building2, Users,
+  Clock, RefreshCw, Settings, Download, BarChart3, History
+} from 'lucide-react';
 
-// Périodes disponibles
-const QUARTERS = {
-  '2026': { start: '2026-01-01', end: '2026-12-31', label: 'Année 2026', year: 2026, isYear: true },
-  '2025': { start: '2025-01-01', end: '2025-12-31', label: 'Année 2025', year: 2025, isYear: true },
-  'Q1 2026': { start: '2026-01-01', end: '2026-03-31', label: 'Jan - Mar 2026', year: 2026, q: 1 },
-  'Q2 2026': { start: '2026-04-01', end: '2026-06-30', label: 'Avr - Jun 2026', year: 2026, q: 2 },
-  'Q3 2026': { start: '2026-07-01', end: '2026-09-30', label: 'Jul - Sep 2026', year: 2026, q: 3 },
-  'Q4 2026': { start: '2026-10-01', end: '2026-12-31', label: 'Oct - Déc 2026', year: 2026, q: 4 },
-  'Q1 2025': { start: '2025-01-01', end: '2025-03-31', label: 'Jan - Mar 2025', year: 2025, q: 1 },
-  'Q2 2025': { start: '2025-04-01', end: '2025-06-30', label: 'Avr - Jun 2025', year: 2025, q: 2 },
-  'Q3 2025': { start: '2025-07-01', end: '2025-09-30', label: 'Jul - Sep 2025', year: 2025, q: 3 },
-  'Q4 2025': { start: '2025-10-01', end: '2025-12-31', label: 'Oct - Déc 2025', year: 2025, q: 4 },
+// ============ DONNÉES HISTORIQUES (bilans) ============
+const HISTORICAL_DATA = {
+  2023: {
+    periode: "22/08/2022 - 31/12/2023",
+    mois: 17,
+    ca: 1582321,
+    achats_freelances: 1310843,
+    marge_brute: 271478,
+    taux_marge: 17.2,
+    charges_externes: 0, // inclus dans achats
+    salaires: 89834,
+    charges_sociales: 30712,
+    resultat_exploitation: 149833,
+    resultat_net: 119144,
+    tresorerie: 197150,
+    creances_clients: 207731,
+    capitaux_propres: 120144,
+    dettes_fournisseurs: 150224
+  },
+  2024: {
+    periode: "01/01/2024 - 31/12/2024",
+    mois: 12,
+    ca: 1543503,
+    achats_freelances: 1427662,
+    marge_brute: 115841,
+    taux_marge: 7.5,
+    charges_externes: 29000,
+    salaires: 50571,
+    charges_sociales: 22052,
+    resultat_exploitation: 40779,
+    resultat_net: 34662,
+    tresorerie: 59930,
+    creances_clients: 183334,
+    capitaux_propres: 78695,
+    dettes_fournisseurs: 123119
+  }
 };
 
-const JOURS_OUVRES_PAR_MOIS = { 1: 22, 2: 20, 3: 22, 4: 21, 5: 21, 6: 22, 7: 22, 8: 18, 9: 22, 10: 22, 11: 21, 12: 20 };
-const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
+// Données annualisées pour comparaison équitable
+const getAnnualizedData = (year) => {
+  const data = HISTORICAL_DATA[year];
+  if (!data) return null;
+  const factor = 12 / data.mois;
+  return {
+    ...data,
+    ca_annualise: Math.round(data.ca * factor),
+    marge_brute_annualisee: Math.round(data.marge_brute * factor),
+    resultat_net_annualise: Math.round(data.resultat_net * factor)
+  };
+};
 
-export default function DashboardV2() {
-  const { consultants, loading, error, fetchConsultants } = useConsultants();
-  
-  const [activeTab, setActiveTab] = useState('overview');
-  const [selectedPeriod, setSelectedPeriod] = useState('Q1 2026');
-  const [showSimulator, setShowSimulator] = useState(false);
+// ============ COMPOSANT PRINCIPAL ============
+const DashboardV2 = () => {
+  const [activeTab, setActiveTab] = useState('global');
+  const [selectedYear, setSelectedYear] = useState('Q1 2026');
   const [showSettings, setShowSettings] = useState(false);
-  const [simulatorData, setSimulatorData] = useState(null);
-  const [notification, setNotification] = useState(null);
-
+  
+  // Paramètres
   const [settings, setSettings] = useState({
     objectifMargeAnnuelle: 150000,
     seuilMarkupAlerte: 10,
     seuilConcentrationClient: 30,
-    seuilFinMissionJours: 30,
-    anneeEnCours: 2026
+    seuilAlerteFin: 30
   });
 
-  // ==================== TRANSFORMATION DES DONNÉES ====================
+  // Données missions (simulées - normalement depuis useConsultants)
+  const missions = [
+    { id: 1, consultant: "Junaid Jabbar", client: "HORSE", tjm_achat: 550, tjm_vente: 620, date_fin: "2026-04-15", statut: "active" },
+    { id: 2, consultant: "Rupam Mandal", client: "ACCENTURE", tjm_achat: 660, tjm_vente: 730, date_fin: "2026-05-30", statut: "active" },
+    { id: 3, consultant: "Salim CISSE", client: "SAE", tjm_achat: 450, tjm_vente: 630, date_fin: "2026-06-30", statut: "active" },
+    { id: 4, consultant: "Naoufal HADI", client: "VALEO", tjm_achat: 875, tjm_vente: 1000, date_fin: "2026-03-31", statut: "active" },
+    { id: 5, consultant: "Anas EL HABRI", client: "ACCENTURE", tjm_achat: 750, tjm_vente: 820, date_fin: "2026-07-31", statut: "active" },
+    { id: 6, consultant: "Annasalman CHEICK ISMAIL", client: "ACCENTURE", tjm_achat: 760, tjm_vente: 800, date_fin: "2026-04-30", statut: "active" },
+    { id: 7, consultant: "MODOU KANE ElHadj", client: "BOULANGER", tjm_achat: 727, tjm_vente: 765, date_fin: "2026-03-20", statut: "active" },
+    { id: 8, consultant: "Abourakhmanne DIABATE", client: "SAE", tjm_achat: 550, tjm_vente: 680, date_fin: "2026-08-31", statut: "active" },
+    { id: 9, consultant: "Serge", client: "SAE", tjm_achat: 725, tjm_vente: 800, date_fin: "2026-05-15", statut: "active" },
+    { id: 10, consultant: "Galo KA", client: "PROFROID", tjm_achat: 500, tjm_vente: 600, date_fin: "2026-06-30", statut: "active" }
+  ];
 
-  // Transformer les données Supabase en format utilisable
-  const missionsData = useMemo(() => {
-    const missions = [];
-    consultants.forEach(consultant => {
-      consultant.missions_v2?.forEach(mission => {
-        const margeJour = mission.tjm_vente - mission.tjm_achat;
-        const markup = mission.tjm_vente > 0 ? (margeJour / mission.tjm_vente) * 100 : 0;
-        
-        // Calculer les jours travaillés
-        const joursParMois = {};
-        mission.jours_travailles?.forEach(jt => {
-          joursParMois[`${jt.annee}-${jt.mois}`] = jt.jours;
-        });
-
-        missions.push({
-          id: mission.id,
-          consultant: `${consultant.prenom} ${consultant.nom}`,
-          consultantId: consultant.id,
-          client: mission.client,
-          tjmAchat: mission.tjm_achat,
-          tjmVente: mission.tjm_vente,
-          margeJour,
-          markup,
-          debut: mission.date_debut,
-          fin: mission.date_fin,
-          statut: mission.statut,
-          joursParMois,
-          jours_travailles: mission.jours_travailles || []
-        });
-      });
-    });
-    return missions;
-  }, [consultants]);
-
-  // ==================== FONCTIONS UTILITAIRES ====================
-
-  const parseDate = (dateStr) => {
-    if (!dateStr) return null;
-    if (dateStr instanceof Date) return dateStr;
-    const d = new Date(dateStr);
-    return !isNaN(d.getTime()) ? d : null;
-  };
-
-  const getJoursOuvres = (startDate, endDate) => {
-    let jours = 0;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const current = new Date(start.getFullYear(), start.getMonth(), 1);
+  // Calculs
+  const calculations = useMemo(() => {
+    const activeMissions = missions.filter(m => m.statut === 'active');
+    const totalMargeJour = activeMissions.reduce((sum, m) => sum + (m.tjm_vente - m.tjm_achat), 0);
+    const avgMarkup = activeMissions.reduce((sum, m) => sum + ((m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100), 0) / activeMissions.length;
     
-    while (current <= end) {
-      const month = current.getMonth() + 1;
-      const year = current.getFullYear();
-      const joursMonth = JOURS_OUVRES_PAR_MOIS[month] || 20;
-      const monthStart = new Date(year, month - 1, 1);
-      const monthEnd = new Date(year, month, 0);
-      const effectiveStart = start > monthStart ? start : monthStart;
-      const effectiveEnd = end < monthEnd ? end : monthEnd;
-      
-      if (effectiveStart <= effectiveEnd) {
-        const totalDaysInMonth = monthEnd.getDate();
-        const daysInPeriod = Math.min((effectiveEnd - effectiveStart) / (1000 * 60 * 60 * 24) + 1, totalDaysInMonth);
-        jours += Math.round(joursMonth * (daysInPeriod / totalDaysInMonth));
-      }
-      current.setMonth(current.getMonth() + 1);
-    }
-    return jours;
-  };
-
-  const getQuarterDates = (quarter) => {
-    const q = QUARTERS[quarter];
-    if (!q) return null;
-    return { start: new Date(q.start), end: new Date(q.end), label: q.label, year: q.year, q: q.q, isYear: q.isYear || false };
-  };
-
-  // ==================== CALCUL DES DONNÉES PAR PÉRIODE ====================
-
-  const calculatePeriodData = (period) => {
-    const periodDates = getQuarterDates(period);
-    if (!periodDates) return null;
-
-    const missionsInPeriod = missionsData
-      .map(mission => {
-        const missionStart = parseDate(mission.debut);
-        const missionEnd = parseDate(mission.fin);
-        
-        if (!missionStart || !missionEnd) return null;
-        if (missionStart > periodDates.end || missionEnd < periodDates.start) return null;
-
-        // Calculer les jours effectifs dans la période
-        let joursEffectifs = 0;
-        let margeReelle = 0;
-        let caReel = 0;
-
-        // Parcourir chaque mois de la période
-        let current = new Date(periodDates.start);
-        while (current <= periodDates.end) {
-          const year = current.getFullYear();
-          const month = current.getMonth() + 1;
-          const key = `${year}-${month}`;
-          
-          // Vérifier si la mission est active ce mois-ci
-          const monthStart = new Date(year, month - 1, 1);
-          const monthEnd = new Date(year, month, 0);
-          
-          if (missionStart <= monthEnd && missionEnd >= monthStart) {
-            // Jours travaillés saisis ou estimation
-            const joursSaisis = mission.joursParMois[key] || 0;
-            
-            if (joursSaisis > 0) {
-              joursEffectifs += joursSaisis;
-              margeReelle += joursSaisis * mission.margeJour;
-              caReel += joursSaisis * mission.tjmVente;
-            } else {
-              // Estimation basée sur les jours ouvrés du mois
-              const joursOuvresMois = JOURS_OUVRES_PAR_MOIS[month] || 20;
-              const effStart = missionStart > monthStart ? missionStart : monthStart;
-              const effEnd = missionEnd < monthEnd ? missionEnd : monthEnd;
-              const ratioMois = (effEnd - effStart) / (monthEnd - monthStart);
-              const joursEstimes = Math.round(joursOuvresMois * Math.min(1, Math.max(0, ratioMois)));
-              
-              joursEffectifs += joursEstimes;
-              margeReelle += joursEstimes * mission.margeJour;
-              caReel += joursEstimes * mission.tjmVente;
-            }
-          }
-          
-          current.setMonth(current.getMonth() + 1);
-        }
-
-        if (joursEffectifs === 0) return null;
-
-        return {
-          ...mission,
-          joursEffectifs,
-          margePeriode: margeReelle,
-          caPeriode: caReel
-        };
-      })
-      .filter(Boolean);
-
-    const totalMarge = missionsInPeriod.reduce((sum, m) => sum + m.margePeriode, 0);
-    const totalCA = missionsInPeriod.reduce((sum, m) => sum + m.caPeriode, 0);
-    const totalJours = missionsInPeriod.reduce((sum, m) => sum + m.joursEffectifs, 0);
-    const alertes = missionsInPeriod.filter(m => m.markup < settings.seuilMarkupAlerte);
-    const markupMoyen = totalCA > 0 ? ((totalMarge / totalCA) * 100) : 0;
-
-    // Concentration client
-    const clientsCA = {};
-    missionsInPeriod.forEach(m => {
-      clientsCA[m.client] = (clientsCA[m.client] || 0) + m.caPeriode;
+    // Alertes markup
+    const alertesMarkup = activeMissions.filter(m => {
+      const markup = (m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100;
+      return markup < settings.seuilMarkupAlerte;
     });
-    const topClientCA = Math.max(...Object.values(clientsCA), 0);
-    const concentrationClient = totalCA > 0 ? (topClientCA / totalCA) * 100 : 0;
-    const topClient = Object.entries(clientsCA).find(([_, ca]) => ca === topClientCA)?.[0] || '';
 
-    return {
-      period,
-      periodDates,
-      missions: missionsInPeriod,
-      stats: {
-        totalMarge,
-        totalCA,
-        totalJours,
-        markupMoyen,
-        nbMissions: missionsInPeriod.length,
-        nbAlertes: alertes.length,
-        concentrationClient,
-        topClient,
-        nbConsultants: new Set(missionsInPeriod.map(m => m.consultantId)).size
-      },
-      alertes
-    };
-  };
-
-  // ==================== DONNÉES FILTRÉES ====================
-
-  const filteredData = useMemo(() => {
-    const currentData = calculatePeriodData(selectedPeriod);
-    if (!currentData) return null;
-
-    const currentPeriodInfo = QUARTERS[selectedPeriod];
-    const isYearView = currentPeriodInfo?.isYear || false;
-
-    // Période de comparaison
-    let previousPeriod = null;
-    if (isYearView) {
-      const previousYear = String(currentPeriodInfo.year - 1);
-      if (QUARTERS[previousYear]) previousPeriod = previousYear;
-    } else {
-      const currentQ = currentPeriodInfo.q;
-      const currentYear = currentPeriodInfo.year;
-      previousPeriod = currentQ === 1 ? `Q4 ${currentYear - 1}` : `Q${currentQ - 1} ${currentYear}`;
-      if (!QUARTERS[previousPeriod]) previousPeriod = null;
-    }
-    
-    const previousData = previousPeriod ? calculatePeriodData(previousPeriod) : null;
-
-    // Évolutions
-    const evolutions = previousData ? {
-      marge: {
-        value: currentData.stats.totalMarge - previousData.stats.totalMarge,
-        percent: previousData.stats.totalMarge > 0 ? ((currentData.stats.totalMarge - previousData.stats.totalMarge) / previousData.stats.totalMarge) * 100 : 0
-      },
-      markup: {
-        value: currentData.stats.markupMoyen - previousData.stats.markupMoyen,
-        percent: 0
-      },
-      missions: {
-        value: currentData.stats.nbMissions - previousData.stats.nbMissions,
-        percent: previousData.stats.nbMissions > 0 ? ((currentData.stats.nbMissions - previousData.stats.nbMissions) / previousData.stats.nbMissions) * 100 : 0
-      }
-    } : null;
-
-    // Données par mois
-    const monthsData = [];
-    let current = new Date(currentData.periodDates.start);
-    while (current <= currentData.periodDates.end) {
-      const monthName = current.toLocaleString('fr-FR', { month: 'short' });
-      const year = current.getFullYear();
-      const month = current.getMonth() + 1;
-      
-      let margeMois = 0;
-      currentData.missions.forEach(m => {
-        const key = `${year}-${month}`;
-        const jours = m.joursParMois[key] || 0;
-        if (jours > 0) {
-          margeMois += jours * m.margeJour;
-        }
-      });
-      
-      monthsData.push({ 
-        mois: monthName.charAt(0).toUpperCase() + monthName.slice(1), 
-        marge: Math.round(margeMois) 
-      });
-      current.setMonth(current.getMonth() + 1);
-    }
-
-    // Données par client
-    const clientsMap = {};
-    currentData.missions.forEach(m => {
-      if (!clientsMap[m.client]) clientsMap[m.client] = { client: m.client, missions: 0, marge: 0, ca: 0, markupTotal: 0 };
-      clientsMap[m.client].missions++;
-      clientsMap[m.client].marge += m.margePeriode;
-      clientsMap[m.client].ca += m.caPeriode;
-      clientsMap[m.client].markupTotal += m.markup;
-    });
-    const clientsArray = Object.values(clientsMap)
-      .map(c => ({ ...c, markupMoyen: c.missions > 0 ? c.markupTotal / c.missions : 0 }))
-      .sort((a, b) => b.marge - a.marge);
-
-    // Missions à renouveler (fin dans les X prochains jours)
+    // Alertes fin de mission
     const today = new Date();
-    const missionsARenouveler = missionsData
-      .filter(m => {
-        if (m.statut !== 'Actif') return false;
-        const finMission = parseDate(m.fin);
-        if (!finMission) return false;
-        const joursRestants = Math.ceil((finMission - today) / (1000 * 60 * 60 * 24));
-        return joursRestants >= 0 && joursRestants <= settings.seuilFinMissionJours;
-      })
-      .map(m => {
-        const finMission = parseDate(m.fin);
-        const joursRestants = Math.ceil((finMission - today) / (1000 * 60 * 60 * 24));
-        return { ...m, joursRestants, dateFin: finMission };
-      })
-      .sort((a, b) => a.joursRestants - b.joursRestants);
+    const alertesFin = activeMissions.filter(m => {
+      const dateFin = new Date(m.date_fin);
+      const joursRestants = Math.ceil((dateFin - today) / (1000 * 60 * 60 * 24));
+      return joursRestants <= settings.seuilAlerteFin && joursRestants > 0;
+    }).map(m => {
+      const dateFin = new Date(m.date_fin);
+      const joursRestants = Math.ceil((dateFin - today) / (1000 * 60 * 60 * 24));
+      return { ...m, joursRestants };
+    }).sort((a, b) => a.joursRestants - b.joursRestants);
 
     return {
-      ...currentData,
-      previousPeriod,
-      previousData,
-      evolutions,
-      monthsData,
-      clientsArray,
-      missionsARenouveler,
-      isYearView
+      totalMargeJour,
+      margeMensuelle: totalMargeJour * 20,
+      margeAnnuelle: totalMargeJour * 218,
+      avgMarkup,
+      nbConsultants: activeMissions.length,
+      alertesMarkup,
+      alertesFin
     };
-  }, [missionsData, selectedPeriod, settings]);
+  }, [missions, settings]);
 
-  // ==================== PROJECTION ANNUELLE ====================
-
-  const predictionData = useMemo(() => {
-    const year = settings.anneeEnCours;
-    const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-    const now = new Date();
-    const currentMonth = now.getMonth();
-
-    // Calculer la marge réalisée par mois (basée sur jours_travailles)
-    const margesParMois = months.map((_, index) => {
-      const month = index + 1;
-      let margeMois = 0;
-      
-      missionsData.forEach(m => {
-        const key = `${year}-${month}`;
-        const jours = m.joursParMois[key] || 0;
-        margeMois += jours * m.margeJour;
-      });
-      
-      return margeMois;
-    });
-
-    // Marge cumulée
-    let cumulRealise = 0;
-    const dataPoints = months.map((mois, index) => {
-      const isRealise = index <= currentMonth || year < now.getFullYear();
-      
-      if (isRealise) {
-        cumulRealise += margesParMois[index];
-      }
-      
-      return {
-        mois,
-        index,
-        realise: isRealise ? cumulRealise : null,
-        margesMois: margesParMois[index],
-        isCurrentMonth: year === now.getFullYear() && index === currentMonth
-      };
-    });
-
-    // Projection
-    const moisRealises = dataPoints.filter(d => d.realise !== null && d.margesMois > 0);
-    const avgMarge = moisRealises.length > 0 
-      ? moisRealises.reduce((s, m) => s + m.margesMois, 0) / moisRealises.length 
-      : 0;
-
-    let cumul = cumulRealise;
-    dataPoints.forEach((d, i) => {
-      if (d.realise === null) {
-        cumul += avgMarge;
-        d.projection = Math.round(cumul);
-        d.projectionHaute = Math.round(cumul * 1.15);
-        d.projectionBasse = Math.round(cumul * 0.85);
-      }
-    });
-
-    const projectionFinale = dataPoints[11].projection || dataPoints[11].realise || 0;
-    const objectif = settings.objectifMargeAnnuelle;
-    const ecartObjectif = projectionFinale - objectif;
-    const ecartPercent = objectif > 0 ? (ecartObjectif / objectif) * 100 : 0;
-
+  // Projection 2025/2026
+  const projection2025 = useMemo(() => {
+    // Basée sur les missions actuelles
+    const margeMensuelle = calculations.margeMensuelle;
+    const caEstime = missions.reduce((sum, m) => sum + m.tjm_vente * 20 * 12, 0);
+    const achatsEstimes = missions.reduce((sum, m) => sum + m.tjm_achat * 20 * 12, 0);
+    const margeEstimee = caEstime - achatsEstimes;
+    const tauxMargeEstime = (margeEstimee / caEstime) * 100;
+    
     return {
-      dataPoints,
-      projectionFinale,
-      objectif,
-      ecartObjectif,
-      ecartPercent,
-      realiseActuel: cumulRealise
+      ca: caEstime,
+      marge_brute: margeEstimee,
+      taux_marge: tauxMargeEstime,
+      resultat_net: margeEstimee * 0.4, // estimation après charges
     };
-  }, [missionsData, settings]);
+  }, [missions, calculations]);
 
-  // ==================== HANDLERS ====================
+  // ============ ONGLET HISTORIQUE ============
+  const HistoriqueTab = () => {
+    const data2023 = getAnnualizedData(2023);
+    const data2024 = HISTORICAL_DATA[2024];
 
-  const showNotificationMsg = (message, type = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+    // Données pour les graphiques
+    const chartDataCA = [
+      { annee: '2023', CA: data2023.ca_annualise, 'Marge brute': data2023.marge_brute_annualisee, 'Résultat net': data2023.resultat_net_annualise },
+      { annee: '2024', CA: data2024.ca, 'Marge brute': data2024.marge_brute, 'Résultat net': data2024.resultat_net },
+      { annee: '2025 (proj)', CA: projection2025.ca, 'Marge brute': projection2025.marge_brute, 'Résultat net': projection2025.resultat_net }
+    ];
 
-  const handleExportPDF = () => {
-    if (!filteredData) return;
-    const { stats, clientsArray } = filteredData;
-    const reportDate = new Date().toLocaleDateString('fr-FR');
-    
-    const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rapport Solensoft - ${selectedPeriod}</title>
-    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;color:#1e293b}.header{text-align:center;margin-bottom:40px;border-bottom:3px solid #3B82F6;padding-bottom:20px}.header h1{font-size:28px}.period{background:#3B82F6;color:white;padding:8px 16px;border-radius:20px;display:inline-block;margin-top:10px}.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:40px}.kpi-card{background:#f8fafc;border-radius:12px;padding:20px;text-align:center;border:1px solid #e2e8f0}.kpi-card h3{font-size:11px;color:#64748b;text-transform:uppercase}.kpi-card .value{font-size:28px;font-weight:bold}.section{margin-bottom:40px}.section h2{font-size:16px;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#3B82F6;color:white;padding:10px 8px;text-align:left}td{padding:8px;border-bottom:1px solid #e2e8f0}.footer{margin-top:40px;text-align:center;color:#94a3b8;font-size:11px;border-top:1px solid #e2e8f0;padding-top:20px}</style></head>
-    <body><div class="header"><h1>📊 Solensoft Consulting</h1><p>Rapport de pilotage</p><div class="period">${selectedPeriod}</div></div>
-    <div class="kpi-grid">
-      <div class="kpi-card"><h3>Marge</h3><div class="value">${(stats.totalMarge/1000).toFixed(1)}K€</div></div>
-      <div class="kpi-card"><h3>Markup moyen</h3><div class="value">${stats.markupMoyen.toFixed(1)}%</div></div>
-      <div class="kpi-card"><h3>Missions</h3><div class="value">${stats.nbMissions}</div></div>
-      <div class="kpi-card"><h3>Alertes</h3><div class="value">${stats.nbAlertes}</div></div>
-    </div>
-    <div class="section"><h2>🏢 Par client</h2><table><thead><tr><th>Client</th><th>Missions</th><th>Marge</th><th>Markup</th></tr></thead><tbody>${clientsArray.map(c => `<tr><td>${c.client}</td><td>${c.missions}</td><td>${Math.round(c.marge).toLocaleString()}€</td><td>${c.markupMoyen.toFixed(1)}%</td></tr>`).join('')}</tbody></table></div>
-    <div class="footer">Solensoft Consulting • ${reportDate}</div></body></html>`;
+    const chartDataMarge = [
+      { annee: '2023', taux: 17.2, objectif: 15 },
+      { annee: '2024', taux: 7.5, objectif: 15 },
+      { annee: '2025 (proj)', taux: projection2025.taux_marge, objectif: 15 }
+    ];
 
-    const w = window.open('', '_blank');
-    w.document.write(htmlContent);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
-    showNotificationMsg('Rapport généré !');
-  };
+    // Calcul des évolutions
+    const evol = (val2024, val2023) => {
+      const pct = ((val2024 - val2023) / val2023 * 100);
+      return { value: pct, isPositive: pct > 0 };
+    };
 
-  const openSimulator = (mission = null) => {
-    setSimulatorData(mission 
-      ? { ...mission, newTjmVente: mission.tjmVente, newTjmAchat: mission.tjmAchat }
-      : { consultant: '', client: '', tjmAchat: 500, tjmVente: 600, newTjmVente: 600, newTjmAchat: 500 }
-    );
-    setShowSimulator(true);
-  };
+    const evolCA = evol(data2024.ca, data2023.ca_annualise);
+    const evolMarge = evol(data2024.marge_brute, data2023.marge_brute_annualisee);
+    const evolResultat = evol(data2024.resultat_net, data2023.resultat_net_annualise);
+    const evolTauxMarge = { value: data2024.taux_marge - data2023.taux_marge, isPositive: false };
 
-  const simResult = simulatorData ? (() => {
-    const newMarge = simulatorData.newTjmVente - simulatorData.newTjmAchat;
-    const newMarkup = simulatorData.newTjmVente > 0 ? (newMarge / simulatorData.newTjmVente) * 100 : 0;
-    return { newMarge, newMarkup, margeMensuelle: newMarge * 20, margeTrimestrielle: newMarge * 62, margeAnnuelle: newMarge * 218 };
-  })() : null;
+    // Analyse automatique
+    const generateAnalysis = () => {
+      const analyses = [];
+      
+      // Analyse taux de marge
+      if (data2024.taux_marge < 10) {
+        analyses.push({
+          type: 'warning',
+          title: 'Taux de marge critique',
+          text: `Le taux de marge a chuté de ${data2023.taux_marge}% à ${data2024.taux_marge}% entre 2023 et 2024 (-${(data2023.taux_marge - data2024.taux_marge).toFixed(1)} points). Les TJM d'achat ont augmenté plus vite que les TJM de vente.`,
+          action: 'Renégocier les TJM de vente (+50-100€/jour) sur les missions en cours.'
+        });
+      }
 
-  // ==================== COMPOSANTS ====================
+      // Analyse CA
+      if (evolCA.value > 20) {
+        analyses.push({
+          type: 'success',
+          title: 'Forte croissance du CA',
+          text: `Le CA annualisé a progressé de +${evolCA.value.toFixed(0)}% entre 2023 et 2024, signe d'une bonne dynamique commerciale et d'un développement du portefeuille clients.`,
+          action: 'Maintenir cette dynamique tout en améliorant les marges.'
+        });
+      }
 
-  const EvolutionBadge = ({ value, percent, suffix = '', inverse = false }) => {
-    const isPositive = inverse ? value < 0 : value >= 0;
-    const color = isPositive ? 'text-emerald-400' : 'text-red-400';
-    const bg = isPositive ? 'bg-emerald-400/10' : 'bg-red-400/10';
-    const Icon = value > 0 ? ArrowUpRight : value < 0 ? ArrowDownRight : Minus;
-    
+      // Analyse trésorerie
+      const evolTreso = evol(data2024.tresorerie, data2023.tresorerie);
+      if (evolTreso.value < -50) {
+        analyses.push({
+          type: 'warning',
+          title: 'Trésorerie en baisse',
+          text: `La trésorerie a diminué de ${evolTreso.value.toFixed(0)}% (${formatMontant(data2023.tresorerie)} → ${formatMontant(data2024.tresorerie)}). Cela s'explique par le financement du BFR lié à la croissance.`,
+          action: 'Réduire le DSO (relances à J+15, J+30) et négocier des acomptes clients.'
+        });
+      }
+
+      // Analyse résultat
+      if (evolResultat.value < -50) {
+        analyses.push({
+          type: 'danger',
+          title: 'Résultat net en forte baisse',
+          text: `Le résultat net a chuté de ${Math.abs(evolResultat.value).toFixed(0)}% malgré une activité stable. La compression des marges impacte directement la rentabilité.`,
+          action: 'Priorité absolue : remonter le taux de marge à minimum 12-15%.'
+        });
+      }
+
+      // Projection positive
+      if (projection2025.taux_marge > data2024.taux_marge) {
+        analyses.push({
+          type: 'info',
+          title: 'Projection 2025 encourageante',
+          text: `Avec les missions actuelles, le taux de marge projeté est de ${projection2025.taux_marge.toFixed(1)}%, en amélioration par rapport à 2024.`,
+          action: 'Continuer à sélectionner des missions avec un markup > 12%.'
+        });
+      }
+
+      return analyses;
+    };
+
+    const analyses = generateAnalysis();
+
     return (
-      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium ${bg} ${color}`}>
-        <Icon className="w-3 h-3" />
-        <span>{value > 0 ? '+' : ''}{percent !== undefined ? percent.toFixed(1) : value.toFixed(1)}{suffix}</span>
+      <div className="space-y-6">
+        {/* KPIs avec tendances */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KPICard
+            title="CA 2024"
+            value={formatMontant(data2024.ca)}
+            evolution={evolCA}
+            subtitle="vs 2023 annualisé"
+            icon={<DollarSign className="w-5 h-5" />}
+          />
+          <KPICard
+            title="Marge brute 2024"
+            value={formatMontant(data2024.marge_brute)}
+            evolution={evolMarge}
+            subtitle="vs 2023 annualisé"
+            icon={<TrendingUp className="w-5 h-5" />}
+          />
+          <KPICard
+            title="Taux de marge"
+            value={`${data2024.taux_marge}%`}
+            evolution={evolTauxMarge}
+            evolutionSuffix=" pts"
+            subtitle="vs 2023"
+            icon={<Percent className="w-5 h-5" />}
+            alert={data2024.taux_marge < 10}
+          />
+          <KPICard
+            title="Résultat net 2024"
+            value={formatMontant(data2024.resultat_net)}
+            evolution={evolResultat}
+            subtitle="vs 2023 annualisé"
+            icon={<PiggyBank className="w-5 h-5" />}
+          />
+        </div>
+
+        {/* Graphique CA / Marge / Résultat */}
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-blue-400" />
+            Évolution annuelle
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={chartDataCA} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="annee" stroke="#9CA3AF" />
+              <YAxis stroke="#9CA3AF" tickFormatter={(v) => `${(v/1000).toFixed(0)}K`} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px' }}
+                formatter={(value) => formatMontant(value)}
+              />
+              <Legend />
+              <Bar dataKey="CA" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Marge brute" fill="#10B981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Résultat net" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Graphique Taux de marge */}
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Percent className="w-5 h-5 text-amber-400" />
+            Évolution du taux de marge
+          </h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <ComposedChart data={chartDataMarge} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="annee" stroke="#9CA3AF" />
+              <YAxis stroke="#9CA3AF" domain={[0, 25]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px' }}
+                formatter={(value) => `${value.toFixed(1)}%`}
+              />
+              <ReferenceLine y={15} stroke="#F59E0B" strokeDasharray="5 5" label={{ value: 'Objectif 15%', fill: '#F59E0B', fontSize: 12 }} />
+              <Line type="monotone" dataKey="taux" stroke="#10B981" strokeWidth={3} dot={{ r: 6, fill: '#10B981' }} name="Taux de marge" />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div className="mt-2 text-sm text-slate-400 text-center">
+            ⚠️ Le taux de marge est passé sous l'objectif de 15% en 2024
+          </div>
+        </div>
+
+        {/* Tableau comparatif */}
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-cyan-400" />
+            Tableau comparatif détaillé
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 border-b border-slate-700">
+                  <th className="text-left py-3 px-4">Indicateur</th>
+                  <th className="text-right py-3 px-4">2023 (17m)</th>
+                  <th className="text-right py-3 px-4">2023 annualisé</th>
+                  <th className="text-right py-3 px-4">2024</th>
+                  <th className="text-right py-3 px-4">Évol.</th>
+                  <th className="text-right py-3 px-4">2025 (proj)</th>
+                </tr>
+              </thead>
+              <tbody className="text-white">
+                <TableRow 
+                  label="Chiffre d'affaires" 
+                  val2023={data2023.ca} 
+                  val2023Ann={data2023.ca_annualise}
+                  val2024={data2024.ca} 
+                  val2025={projection2025.ca}
+                />
+                <TableRow 
+                  label="Achats freelances" 
+                  val2023={data2023.achats_freelances} 
+                  val2023Ann={Math.round(data2023.achats_freelances * 12/17)}
+                  val2024={data2024.achats_freelances} 
+                  val2025={projection2025.ca - projection2025.marge_brute}
+                />
+                <TableRow 
+                  label="Marge brute" 
+                  val2023={data2023.marge_brute} 
+                  val2023Ann={data2023.marge_brute_annualisee}
+                  val2024={data2024.marge_brute} 
+                  val2025={projection2025.marge_brute}
+                  highlight
+                />
+                <TableRowPercent 
+                  label="Taux de marge" 
+                  val2023={data2023.taux_marge} 
+                  val2024={data2024.taux_marge} 
+                  val2025={projection2025.taux_marge}
+                  alert={data2024.taux_marge < 10}
+                />
+                <TableRow 
+                  label="Résultat net" 
+                  val2023={data2023.resultat_net} 
+                  val2023Ann={data2023.resultat_net_annualise}
+                  val2024={data2024.resultat_net} 
+                  val2025={projection2025.resultat_net}
+                  highlight
+                />
+                <TableRow 
+                  label="Trésorerie" 
+                  val2023={data2023.tresorerie} 
+                  val2023Ann={data2023.tresorerie}
+                  val2024={data2024.tresorerie} 
+                  val2025={null}
+                />
+                <TableRow 
+                  label="Créances clients" 
+                  val2023={data2023.creances_clients} 
+                  val2023Ann={data2023.creances_clients}
+                  val2024={data2024.creances_clients} 
+                  val2025={null}
+                />
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Analyse automatique */}
+        <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-yellow-400" />
+            Analyse & Recommandations
+          </h3>
+          <div className="space-y-4">
+            {analyses.map((analysis, idx) => (
+              <div 
+                key={idx} 
+                className={`p-4 rounded-lg border ${
+                  analysis.type === 'warning' ? 'bg-amber-500/10 border-amber-500/30' :
+                  analysis.type === 'danger' ? 'bg-red-500/10 border-red-500/30' :
+                  analysis.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30' :
+                  'bg-blue-500/10 border-blue-500/30'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    analysis.type === 'warning' ? 'bg-amber-500/20' :
+                    analysis.type === 'danger' ? 'bg-red-500/20' :
+                    analysis.type === 'success' ? 'bg-emerald-500/20' :
+                    'bg-blue-500/20'
+                  }`}>
+                    {analysis.type === 'warning' || analysis.type === 'danger' ? 
+                      <AlertTriangle className={`w-5 h-5 ${analysis.type === 'danger' ? 'text-red-400' : 'text-amber-400'}`} /> :
+                      <TrendingUp className={`w-5 h-5 ${analysis.type === 'success' ? 'text-emerald-400' : 'text-blue-400'}`} />
+                    }
+                  </div>
+                  <div className="flex-1">
+                    <h4 className={`font-semibold mb-1 ${
+                      analysis.type === 'warning' ? 'text-amber-400' :
+                      analysis.type === 'danger' ? 'text-red-400' :
+                      analysis.type === 'success' ? 'text-emerald-400' :
+                      'text-blue-400'
+                    }`}>{analysis.title}</h4>
+                    <p className="text-slate-300 text-sm mb-2">{analysis.text}</p>
+                    <p className="text-slate-400 text-sm flex items-center gap-1">
+                      <ChevronRight className="w-4 h-4" />
+                      <span className="font-medium">Action :</span> {analysis.action}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Projection 2025 */}
+        <div className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 rounded-xl p-6 border border-violet-500/30">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Target className="w-5 h-5 text-violet-400" />
+            Projection 2025 (basée sur missions actuelles)
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <div className="text-slate-400 text-sm">CA estimé</div>
+              <div className="text-2xl font-bold text-white">{formatMontant(projection2025.ca)}</div>
+              <div className="text-xs text-slate-500">{missions.length} consultants × 218j</div>
+            </div>
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <div className="text-slate-400 text-sm">Marge brute estimée</div>
+              <div className="text-2xl font-bold text-emerald-400">{formatMontant(projection2025.marge_brute)}</div>
+              <div className="text-xs text-slate-500">Basé sur TJM actuels</div>
+            </div>
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <div className="text-slate-400 text-sm">Taux de marge projeté</div>
+              <div className={`text-2xl font-bold ${projection2025.taux_marge >= 10 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {projection2025.taux_marge.toFixed(1)}%
+              </div>
+              <div className="text-xs text-slate-500">Objectif : 15%</div>
+            </div>
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <div className="text-slate-400 text-sm">Résultat net estimé</div>
+              <div className="text-2xl font-bold text-violet-400">{formatMontant(projection2025.resultat_net)}</div>
+              <div className="text-xs text-slate-500">~40% de la marge</div>
+            </div>
+          </div>
+          <div className="mt-4 p-3 bg-slate-800/30 rounded-lg text-sm text-slate-400">
+            💡 Cette projection suppose que toutes les missions actuelles continuent sur 12 mois avec les TJM actuels.
+          </div>
+        </div>
       </div>
     );
   };
 
-  const KPICard = ({ title, value, subtitle, icon: Icon, evolution, evolutionLabel, alert, onClick }) => (
-    <div onClick={onClick} className={`relative overflow-hidden rounded-2xl p-5 transition-all ${onClick ? 'cursor-pointer hover:scale-[1.02]' : ''} ${alert ? 'bg-gradient-to-br from-red-900/40 to-red-950/60 border border-red-500/30' : 'bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50'}`}>
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-slate-400 text-xs font-medium tracking-wide uppercase">{title}</p>
-          <p className={`text-2xl font-bold mt-1 ${alert ? 'text-red-400' : 'text-white'}`}>{value}</p>
-          {subtitle && <p className="text-slate-500 text-xs mt-1">{subtitle}</p>}
-          {evolution !== undefined && evolution !== null && (
-            <div className="mt-2">
-              <EvolutionBadge value={evolution.value} percent={evolution.percent} suffix={evolutionLabel} inverse={alert} />
-            </div>
-          )}
+  // ============ COMPOSANTS UTILITAIRES ============
+  const formatMontant = (montant) => {
+    if (montant === null || montant === undefined) return '-';
+    if (montant >= 1000000) {
+      return `${(montant / 1000000).toFixed(2)}M€`;
+    }
+    if (montant >= 1000) {
+      return `${(montant / 1000).toFixed(0)}K€`;
+    }
+    return `${montant.toFixed(0)}€`;
+  };
+
+  const KPICard = ({ title, value, evolution, subtitle, icon, evolutionSuffix = '%', alert = false }) => (
+    <div className={`bg-slate-800/50 rounded-xl p-4 border ${alert ? 'border-red-500/50' : 'border-slate-700'}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-slate-400 text-sm">{title}</span>
+        <div className={`p-2 rounded-lg ${alert ? 'bg-red-500/20 text-red-400' : 'bg-slate-700 text-slate-300'}`}>
+          {icon}
         </div>
-        <div className={`p-2 rounded-xl ${alert ? 'bg-red-500/20' : 'bg-blue-500/20'}`}>
-          <Icon className={`w-5 h-5 ${alert ? 'text-red-400' : 'text-blue-400'}`} />
-        </div>
+      </div>
+      <div className={`text-2xl font-bold ${alert ? 'text-red-400' : 'text-white'}`}>{value}</div>
+      <div className="flex items-center gap-2 mt-1">
+        {evolution && (
+          <span className={`text-sm flex items-center gap-1 ${evolution.isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+            {evolution.isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+            {evolution.isPositive ? '+' : ''}{evolution.value.toFixed(1)}{evolutionSuffix}
+          </span>
+        )}
+        <span className="text-slate-500 text-xs">{subtitle}</span>
       </div>
     </div>
   );
 
-  // ==================== RENDER ====================
-
-  if (loading) {
+  const TableRow = ({ label, val2023, val2023Ann, val2024, val2025, highlight = false }) => {
+    const evol = val2023Ann && val2024 ? ((val2024 - val2023Ann) / val2023Ann * 100) : null;
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Navigation />
-        <div className="flex flex-col items-center gap-4">
-          <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-          <p className="text-slate-400">Chargement des données...</p>
-        </div>
-      </div>
+      <tr className={`border-b border-slate-700/50 ${highlight ? 'bg-slate-700/20' : ''}`}>
+        <td className="py-3 px-4 text-slate-300">{label}</td>
+        <td className="py-3 px-4 text-right text-slate-400">{formatMontant(val2023)}</td>
+        <td className="py-3 px-4 text-right text-slate-300">{formatMontant(val2023Ann)}</td>
+        <td className="py-3 px-4 text-right font-medium">{formatMontant(val2024)}</td>
+        <td className="py-3 px-4 text-right">
+          {evol !== null && (
+            <span className={`${evol >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {evol >= 0 ? '+' : ''}{evol.toFixed(0)}%
+            </span>
+          )}
+        </td>
+        <td className="py-3 px-4 text-right text-violet-400">{formatMontant(val2025)}</td>
+      </tr>
     );
-  }
+  };
 
-  if (error) {
+  const TableRowPercent = ({ label, val2023, val2024, val2025, alert = false }) => {
+    const evol = val2024 - val2023;
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Navigation />
-        <div className="text-center">
-          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <p className="text-red-400">Erreur: {error}</p>
-          <button onClick={fetchConsultants} className="mt-4 px-4 py-2 bg-blue-600 rounded-lg">Réessayer</button>
-        </div>
-      </div>
+      <tr className={`border-b border-slate-700/50 ${alert ? 'bg-red-500/10' : ''}`}>
+        <td className="py-3 px-4 text-slate-300">{label}</td>
+        <td className="py-3 px-4 text-right text-slate-400">{val2023}%</td>
+        <td className="py-3 px-4 text-right text-slate-300">{val2023}%</td>
+        <td className={`py-3 px-4 text-right font-medium ${alert ? 'text-red-400' : ''}`}>{val2024}%</td>
+        <td className="py-3 px-4 text-right">
+          <span className={`${evol >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {evol >= 0 ? '+' : ''}{evol.toFixed(1)} pts
+          </span>
+        </td>
+        <td className="py-3 px-4 text-right text-violet-400">{val2025.toFixed(1)}%</td>
+      </tr>
     );
-  }
+  };
 
-  if (missionsData.length === 0) {
-    return (
-      <div className="min-h-screen bg-slate-950">
-        <Navigation />
-        <div className="flex flex-col items-center justify-center py-20">
-          <Users className="w-16 h-16 text-slate-600 mb-4" />
-          <h2 className="text-xl font-semibold text-white mb-2">Aucune mission</h2>
-          <p className="text-slate-400 mb-6">Commencez par créer des consultants et missions dans l'onglet Ressources</p>
-          <a href="/ressources" className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-medium">
-            Aller aux Ressources
-          </a>
+  // ============ ONGLET VUE GLOBALE (simplifié) ============
+  const VueGlobaleTab = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <div className="text-slate-400 text-sm">Consultants actifs</div>
+          <div className="text-3xl font-bold text-white">{calculations.nbConsultants}</div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
-      <Navigation />
-      
-      <div className="p-4 md:p-6">
-        {/* Notification */}
-        {notification && (
-          <div className={`fixed top-20 right-4 z-50 px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 ${notification.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
-            {notification.type === 'success' ? <Check className="w-5 h-5" /> : <X className="w-5 h-5" />}
-            <span className="font-medium">{notification.message}</span>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <div className="text-slate-400 text-sm">Marge / jour</div>
+          <div className="text-3xl font-bold text-emerald-400">{calculations.totalMargeJour}€</div>
+        </div>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <div className="text-slate-400 text-sm">Markup moyen</div>
+          <div className={`text-3xl font-bold ${calculations.avgMarkup >= 10 ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {calculations.avgMarkup.toFixed(1)}%
           </div>
-        )}
+        </div>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <div className="text-slate-400 text-sm">À renouveler</div>
+          <div className={`text-3xl font-bold ${calculations.alertesFin.length > 0 ? 'text-amber-400' : 'text-white'}`}>
+            {calculations.alertesFin.length}
+          </div>
+        </div>
+      </div>
 
+      {/* Alertes */}
+      {(calculations.alertesMarkup.length > 0 || calculations.alertesFin.length > 0) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+          <h3 className="text-amber-400 font-semibold mb-3 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            Alertes ({calculations.alertesMarkup.length + calculations.alertesFin.length})
+          </h3>
+          <div className="space-y-2">
+            {calculations.alertesFin.map((m, i) => (
+              <div key={i} className="flex items-center justify-between text-sm bg-slate-800/50 rounded-lg p-2">
+                <span className="text-white">{m.consultant} - {m.client}</span>
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  m.joursRestants <= 7 ? 'bg-red-500/20 text-red-400' :
+                  m.joursRestants <= 15 ? 'bg-orange-500/20 text-orange-400' :
+                  'bg-amber-500/20 text-amber-400'
+                }`}>
+                  Fin dans {m.joursRestants}j
+                </span>
+              </div>
+            ))}
+            {calculations.alertesMarkup.map((m, i) => (
+              <div key={`m-${i}`} className="flex items-center justify-between text-sm bg-slate-800/50 rounded-lg p-2">
+                <span className="text-white">{m.consultant} - {m.client}</span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400">
+                  Markup {((m.tjm_vente - m.tjm_achat) / m.tjm_vente * 100).toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ============ RENDU PRINCIPAL ============
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Pilotage</h1>
+            <h1 className="text-2xl font-bold text-white">Pilotage</h1>
             <p className="text-slate-400 text-sm">Données temps réel depuis Ressources</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={fetchConsultants} className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-colors text-sm">
-              <RefreshCw className="w-4 h-4" /><span className="hidden sm:inline">Actualiser</span>
+          <div className="flex items-center gap-3">
+            <button className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm transition-colors">
+              <RefreshCw className="w-4 h-4" />
+              Actualiser
             </button>
-            <button onClick={handleExportPDF} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl transition-colors text-sm">
-              <FileDown className="w-4 h-4" /><span className="hidden sm:inline">PDF</span>
+            <button className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm transition-colors">
+              <Download className="w-4 h-4" />
+              PDF
             </button>
-            <button onClick={() => openSimulator()} className="flex items-center gap-2 px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl transition-colors text-sm">
-              <Calculator className="w-4 h-4" /><span className="hidden sm:inline">Simuler</span>
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white transition-colors"
+            >
+              <Settings className="w-5 h-5" />
             </button>
-            <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-colors text-sm">
-              <Settings className="w-4 h-4" />
-            </button>
-            <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-600 to-violet-600 rounded-xl">
-              <Calendar className="w-4 h-4" />
-              <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="bg-transparent text-white outline-none cursor-pointer font-medium text-sm">
-                <optgroup label="📅 Années">
-                  <option value="2026">2026 (année)</option>
-                  <option value="2025">2025 (année)</option>
-                </optgroup>
-                <optgroup label="📊 Trimestres 2026">
-                  <option value="Q1 2026">Q1 2026</option>
-                  <option value="Q2 2026">Q2 2026</option>
-                  <option value="Q3 2026">Q3 2026</option>
-                  <option value="Q4 2026">Q4 2026</option>
-                </optgroup>
-                <optgroup label="📊 Trimestres 2025">
-                  <option value="Q1 2025">Q1 2025</option>
-                  <option value="Q2 2025">Q2 2025</option>
-                  <option value="Q3 2025">Q3 2025</option>
-                  <option value="Q4 2025">Q4 2025</option>
-                </optgroup>
-              </select>
-            </div>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Onglets */}
         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {[
-            { id: 'overview', label: '📊 Vue globale' },
-            { id: 'prediction', label: '📈 Projection' },
-            { id: 'missions', label: '👥 Missions' },
-            { id: 'clients', label: '🏢 Clients' },
-            { id: 'alerts', label: `⚠️ Alertes (${(filteredData?.stats.nbAlertes || 0) + (filteredData?.missionsARenouveler?.length || 0)})` },
+            { id: 'global', label: 'Vue globale', icon: <BarChart3 className="w-4 h-4" /> },
+            { id: 'historique', label: 'Historique', icon: <History className="w-4 h-4" /> },
+            { id: 'missions', label: 'Missions', icon: <Users className="w-4 h-4" /> },
+            { id: 'alertes', label: `Alertes (${calculations.alertesMarkup.length + calculations.alertesFin.length})`, icon: <AlertTriangle className="w-4 h-4" /> },
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all text-sm ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'}`}>
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                activeTab === tab.id 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              {tab.icon}
               {tab.label}
             </button>
           ))}
         </div>
 
-        {/* Settings Modal */}
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-2xl p-6 max-w-md w-full border border-slate-700">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold flex items-center gap-2"><Settings className="w-5 h-5 text-blue-400" />Paramètres</h2>
-                <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-800 rounded-lg"><X className="w-5 h-5" /></button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-slate-400 text-sm mb-2">🎯 Objectif marge annuelle</label>
-                  <div className="flex items-center gap-2">
-                    <input type="number" value={settings.objectifMargeAnnuelle} onChange={(e) => setSettings({ ...settings, objectifMargeAnnuelle: parseInt(e.target.value) || 0 })} className="flex-1 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
-                    <span className="text-slate-400">€</span>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-slate-400 text-sm mb-2">⚠️ Seuil alerte markup</label>
-                  <div className="flex items-center gap-2">
-                    <input type="number" value={settings.seuilMarkupAlerte} onChange={(e) => setSettings({ ...settings, seuilMarkupAlerte: parseFloat(e.target.value) || 0 })} className="w-24 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
-                    <span className="text-slate-400">%</span>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-slate-400 text-sm mb-2">🏢 Seuil concentration client</label>
-                  <div className="flex items-center gap-2">
-                    <input type="number" value={settings.seuilConcentrationClient} onChange={(e) => setSettings({ ...settings, seuilConcentrationClient: parseFloat(e.target.value) || 0 })} className="w-24 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
-                    <span className="text-slate-400">%</span>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-slate-400 text-sm mb-2">📅 Alerte fin de mission</label>
-                  <div className="flex items-center gap-2">
-                    <input type="number" value={settings.seuilFinMissionJours} onChange={(e) => setSettings({ ...settings, seuilFinMissionJours: parseInt(e.target.value) || 30 })} className="w-24 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono focus:border-blue-500 outline-none" />
-                    <span className="text-slate-400">jours</span>
-                  </div>
-                  <p className="text-slate-500 text-xs mt-1">Alerter si mission se termine dans moins de X jours</p>
-                </div>
-              </div>
-
-              <button onClick={() => { setShowSettings(false); showNotificationMsg('Paramètres enregistrés'); }} className="w-full mt-6 px-4 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium transition-colors">
-                Enregistrer
-              </button>
-            </div>
+        {/* Contenu */}
+        {activeTab === 'global' && <VueGlobaleTab />}
+        {activeTab === 'historique' && <HistoriqueTab />}
+        {activeTab === 'missions' && (
+          <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+            <p className="text-slate-400">Onglet Missions - à venir</p>
           </div>
         )}
-
-        {/* Simulator Modal */}
-        {showSimulator && simulatorData && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-2xl p-6 max-w-lg w-full border border-slate-700">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold flex items-center gap-2"><Calculator className="w-5 h-5 text-violet-400" />Simulateur</h2>
-                <button onClick={() => setShowSimulator(false)} className="p-2 hover:bg-slate-800 rounded-lg"><X className="w-5 h-5" /></button>
-              </div>
-              {simulatorData.consultant && <p className="text-slate-400 mb-4">{simulatorData.consultant} - {simulatorData.client}</p>}
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">TJM Achat</label>
-                  <input type="number" value={simulatorData.newTjmAchat} onChange={(e) => setSimulatorData({ ...simulatorData, newTjmAchat: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono" />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">TJM Vente</label>
-                  <input type="number" value={simulatorData.newTjmVente} onChange={(e) => setSimulatorData({ ...simulatorData, newTjmVente: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono" />
-                </div>
-              </div>
-              {simResult && (
-                <div className="grid grid-cols-4 gap-2 mb-4">
-                  <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-                    <p className="text-slate-400 text-xs">Marge/J</p>
-                    <p className={`text-lg font-bold ${simResult.newMarkup >= settings.seuilMarkupAlerte ? 'text-emerald-400' : 'text-red-400'}`}>{simResult.newMarge}€</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-                    <p className="text-slate-400 text-xs">Markup</p>
-                    <p className={`text-lg font-bold ${simResult.newMarkup >= settings.seuilMarkupAlerte ? 'text-emerald-400' : 'text-red-400'}`}>{simResult.newMarkup.toFixed(1)}%</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-                    <p className="text-slate-400 text-xs">Trim.</p>
-                    <p className="text-lg font-bold text-white">{(simResult.margeTrimestrielle/1000).toFixed(1)}K</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-                    <p className="text-slate-400 text-xs">Année</p>
-                    <p className="text-lg font-bold text-white">{(simResult.margeAnnuelle/1000).toFixed(1)}K</p>
-                  </div>
-                </div>
-              )}
-            </div>
+        {activeTab === 'alertes' && (
+          <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+            <p className="text-slate-400">Onglet Alertes détaillé - à venir</p>
           </div>
-        )}
-
-        {/* CONTENT */}
-        {filteredData && (
-          <>
-            {/* Overview Tab */}
-            {activeTab === 'overview' && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-                  <KPICard title={filteredData.isYearView ? "Marge année" : "Marge période"} value={`${(filteredData.stats.totalMarge/1000).toFixed(1)}K€`} icon={Euro} evolution={filteredData.evolutions?.marge} evolutionLabel="%" />
-                  <KPICard title="Markup moyen" value={`${filteredData.stats.markupMoyen.toFixed(1)}%`} subtitle={`Objectif: ${settings.seuilMarkupAlerte}%`} icon={Target} evolution={filteredData.evolutions?.markup ? { value: filteredData.evolutions.markup.value } : null} evolutionLabel=" pts" />
-                  <KPICard title="Missions" value={filteredData.stats.nbMissions} subtitle={`${filteredData.stats.nbConsultants} consultants`} icon={Users} evolution={filteredData.evolutions?.missions} evolutionLabel="%" />
-                  <KPICard title="Concentration" value={`${filteredData.stats.concentrationClient.toFixed(0)}%`} subtitle={filteredData.stats.topClient} icon={Building2} alert={filteredData.stats.concentrationClient > settings.seuilConcentrationClient} />
-                  <KPICard title="Alertes markup" value={filteredData.stats.nbAlertes} subtitle={`< ${settings.seuilMarkupAlerte}%`} icon={AlertTriangle} alert={filteredData.stats.nbAlertes > 0} onClick={() => setActiveTab('alerts')} />
-                  <KPICard title="À renouveler" value={filteredData.missionsARenouveler?.length || 0} subtitle={`< ${settings.seuilFinMissionJours}j`} icon={Clock} alert={(filteredData.missionsARenouveler?.length || 0) > 0} onClick={() => setActiveTab('alerts')} />
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="bg-slate-800/50 rounded-2xl p-5 border border-slate-700/50">
-                    <h3 className="text-base font-semibold mb-4">📈 Marge par mois</h3>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={filteredData.monthsData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                        <XAxis dataKey="mois" stroke="#94a3b8" tick={{ fontSize: 12 }} />
-                        <YAxis stroke="#94a3b8" tickFormatter={(v) => `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 12 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }} formatter={(v) => [`${v.toLocaleString()}€`, 'Marge']} />
-                        <Bar dataKey="marge" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="bg-slate-800/50 rounded-2xl p-5 border border-slate-700/50">
-                    <h3 className="text-base font-semibold mb-4">🏢 Répartition clients</h3>
-                    <div className="flex items-center">
-                      <ResponsiveContainer width="50%" height={180}>
-                        <PieChart>
-                          <Pie data={filteredData.clientsArray.slice(0, 6)} dataKey="marge" nameKey="client" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2}>
-                            {filteredData.clientsArray.slice(0, 6).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                          </Pie>
-                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }} formatter={(v) => [`${Math.round(v).toLocaleString()}€`]} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="flex-1 space-y-1">
-                        {filteredData.clientsArray.slice(0, 5).map((c, i) => (
-                          <div key={c.client} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i] }} />
-                              <span className="text-slate-300 truncate">{c.client}</span>
-                            </div>
-                            <span className="text-white font-mono">{(c.marge/1000).toFixed(1)}K</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Prediction Tab */}
-            {activeTab === 'prediction' && (
-              <div className="space-y-6">
-                <div className={`rounded-2xl p-6 border ${predictionData.ecartPercent >= 0 ? 'bg-emerald-900/20 border-emerald-500/30' : 'bg-orange-900/20 border-orange-500/30'}`}>
-                  <div className="flex items-start gap-4">
-                    <div className={`p-3 rounded-xl ${predictionData.ecartPercent >= 0 ? 'bg-emerald-500/20' : 'bg-orange-500/20'}`}>
-                      <Target className={`w-8 h-8 ${predictionData.ecartPercent >= 0 ? 'text-emerald-400' : 'text-orange-400'}`} />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold mb-1">
-                        {predictionData.ecartPercent >= 0 ? '🎯 Objectif atteignable !' : '⚠️ Objectif en danger'}
-                      </h2>
-                      <p className="text-slate-300">
-                        Projection fin {settings.anneeEnCours} : <span className="font-bold text-white">{(predictionData.projectionFinale/1000).toFixed(0)}K€</span>
-                        {' '}(objectif : {(settings.objectifMargeAnnuelle/1000).toFixed(0)}K€)
-                      </p>
-                      <p className={`mt-2 font-medium ${predictionData.ecartPercent >= 0 ? 'text-emerald-400' : 'text-orange-400'}`}>
-                        {predictionData.ecartPercent >= 0 ? '+' : ''}{predictionData.ecartPercent.toFixed(1)}% vs objectif
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50">
-                  <h3 className="text-lg font-semibold mb-6">📈 Projection marge cumulée {settings.anneeEnCours}</h3>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <ComposedChart data={predictionData.dataPoints}>
-                      <defs>
-                        <linearGradient id="colorConf" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="mois" stroke="#94a3b8" />
-                      <YAxis stroke="#94a3b8" tickFormatter={(v) => `${(v/1000).toFixed(0)}K€`} />
-                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }} formatter={(value) => value !== null ? [`${(value/1000).toFixed(1)}K€`] : ['-']} />
-                      <Legend />
-                      <Area type="monotone" dataKey="projectionHaute" stroke="transparent" fill="url(#colorConf)" name="Intervalle" />
-                      <ReferenceLine y={settings.objectifMargeAnnuelle} stroke="#F59E0B" strokeDasharray="5 5" />
-                      <Line type="monotone" dataKey="realise" stroke="#10B981" strokeWidth={3} dot={{ fill: '#10B981', r: 4 }} name="Réalisé" connectNulls={false} />
-                      <Line type="monotone" dataKey="projection" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="8 4" dot={{ fill: '#8B5CF6', r: 3 }} name="Projection" connectNulls={false} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
-                    <p className="text-slate-400 text-sm">Réalisé YTD</p>
-                    <p className="text-2xl font-bold text-emerald-400">{(predictionData.realiseActuel/1000).toFixed(1)}K€</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
-                    <p className="text-slate-400 text-sm">Projection fin {settings.anneeEnCours}</p>
-                    <p className="text-2xl font-bold text-violet-400">{(predictionData.projectionFinale/1000).toFixed(0)}K€</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
-                    <p className="text-slate-400 text-sm">Objectif annuel</p>
-                    <p className="text-2xl font-bold text-amber-400">{(settings.objectifMargeAnnuelle/1000).toFixed(0)}K€</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700/50">
-                    <p className="text-slate-400 text-sm">Écart prévu</p>
-                    <p className={`text-2xl font-bold ${predictionData.ecartObjectif >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {predictionData.ecartObjectif >= 0 ? '+' : ''}{(predictionData.ecartObjectif/1000).toFixed(0)}K€
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Missions Tab */}
-            {activeTab === 'missions' && (
-              <div className="bg-slate-800/50 rounded-2xl p-5 border border-slate-700/50">
-                <h3 className="text-base font-semibold mb-4">Missions {selectedPeriod} ({filteredData.missions.length})</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-slate-400 border-b border-slate-700">
-                        <th className="pb-3 font-medium">Consultant</th>
-                        <th className="pb-3 font-medium">Client</th>
-                        <th className="pb-3 font-medium text-right">Jours</th>
-                        <th className="pb-3 font-medium text-right">Marge/J</th>
-                        <th className="pb-3 font-medium text-right">Marge</th>
-                        <th className="pb-3 font-medium text-right">Markup</th>
-                        <th className="pb-3 font-medium text-center">Simuler</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredData.missions.map(m => (
-                        <tr key={m.id} className={`border-b border-slate-700/50 hover:bg-slate-700/20 ${m.markup < settings.seuilMarkupAlerte ? 'bg-red-900/10' : ''}`}>
-                          <td className="py-3 font-medium">{m.consultant}</td>
-                          <td className="py-3 text-slate-300">{m.client}</td>
-                          <td className="py-3 text-right font-mono">{m.joursEffectifs}j</td>
-                          <td className="py-3 text-right font-mono">{m.margeJour}€</td>
-                          <td className="py-3 text-right font-mono text-emerald-400">{m.margePeriode.toLocaleString()}€</td>
-                          <td className={`py-3 text-right font-mono font-medium ${m.markup >= settings.seuilMarkupAlerte ? 'text-emerald-400' : 'text-red-400'}`}>{m.markup.toFixed(1)}%</td>
-                          <td className="py-3 text-center">
-                            <button onClick={() => openSimulator(m)} className="p-1.5 rounded-lg bg-slate-700/50 hover:bg-violet-600/50"><Calculator className="w-4 h-4" /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Clients Tab */}
-            {activeTab === 'clients' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredData.clientsArray.map((client, i) => (
-                  <div key={client.client} className={`bg-slate-800/50 rounded-2xl p-5 border ${client.markupMoyen < settings.seuilMarkupAlerte ? 'border-red-500/30' : 'border-slate-700/50'}`}>
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold" style={{ backgroundColor: COLORS[i % COLORS.length] + '30', color: COLORS[i % COLORS.length] }}>
-                        {client.client.charAt(0)}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold">{client.client}</h3>
-                        <p className="text-slate-400 text-sm">{client.missions} mission(s)</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Marge</span>
-                        <span className="font-mono text-emerald-400">{Math.round(client.marge).toLocaleString()}€</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">CA</span>
-                        <span className="font-mono">{Math.round(client.ca).toLocaleString()}€</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Markup moy.</span>
-                        <span className={`font-mono font-medium ${client.markupMoyen >= settings.seuilMarkupAlerte ? 'text-emerald-400' : 'text-red-400'}`}>{client.markupMoyen.toFixed(1)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Alerts Tab */}
-            {activeTab === 'alerts' && (
-              <div className="space-y-6">
-                {/* Section Missions à renouveler */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-orange-400" />
-                    Missions à renouveler
-                    <span className="text-sm font-normal text-slate-400">(fin dans moins de {settings.seuilFinMissionJours} jours)</span>
-                  </h3>
-                  
-                  {(!filteredData.missionsARenouveler || filteredData.missionsARenouveler.length === 0) ? (
-                    <div className="bg-slate-800/50 rounded-2xl p-8 text-center border border-slate-700/50">
-                      <Check className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
-                      <p className="text-slate-400">Aucune mission à renouveler prochainement</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="bg-orange-900/20 rounded-2xl p-4 border border-orange-500/30">
-                        <p className="text-orange-400 font-medium">⚠️ {filteredData.missionsARenouveler.length} mission(s) se termine(nt) bientôt</p>
-                      </div>
-                      {filteredData.missionsARenouveler.map(m => (
-                        <div key={m.id} className={`bg-slate-800/50 rounded-xl p-4 border flex items-center justify-between ${m.joursRestants <= 7 ? 'border-red-500/50' : m.joursRestants <= 15 ? 'border-orange-500/30' : 'border-yellow-500/30'}`}>
-                          <div>
-                            <p className="font-medium">{m.consultant}</p>
-                            <p className="text-slate-400 text-sm">{m.client}</p>
-                            <p className="text-slate-500 text-xs mt-1">Fin : {m.dateFin?.toLocaleDateString('fr-FR')}</p>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-center">
-                              <p className={`text-2xl font-bold ${m.joursRestants <= 7 ? 'text-red-400' : m.joursRestants <= 15 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                                {m.joursRestants}
-                              </p>
-                              <p className="text-slate-500 text-xs">jours</p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-lg font-semibold text-white">{m.margeJour}€</p>
-                              <p className="text-slate-500 text-xs">marge/j</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Section Alertes Markup */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-red-400" />
-                    Alertes markup
-                    <span className="text-sm font-normal text-slate-400">(sous {settings.seuilMarkupAlerte}%)</span>
-                  </h3>
-                  
-                  {filteredData.alertes.length === 0 ? (
-                    <div className="bg-slate-800/50 rounded-2xl p-8 text-center border border-slate-700/50">
-                      <Check className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
-                      <p className="text-slate-400">Toutes les missions sont au-dessus de {settings.seuilMarkupAlerte}%</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="bg-red-900/20 rounded-2xl p-4 border border-red-500/30">
-                        <p className="text-red-400 font-medium">{filteredData.alertes.length} mission(s) sous {settings.seuilMarkupAlerte}% de markup</p>
-                      </div>
-                      {filteredData.alertes.sort((a, b) => a.markup - b.markup).map(m => (
-                        <div key={m.id} className="bg-slate-800/50 rounded-xl p-4 border border-red-500/30 flex items-center justify-between">
-                          <div>
-                            <p className="font-medium">{m.consultant}</p>
-                            <p className="text-slate-400 text-sm">{m.client}</p>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-center">
-                              <p className="text-red-400 text-xl font-bold">{m.markup.toFixed(1)}%</p>
-                              <p className="text-slate-500 text-xs">markup</p>
-                            </div>
-                            <button onClick={() => openSimulator(m)} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Simuler</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
         )}
 
         {/* Footer */}
-        <div className="mt-8 pt-4 border-t border-slate-800 text-center text-slate-500 text-xs">
-          Solensoft Consulting • {selectedPeriod} • Données temps réel
+        <div className="mt-8 text-center text-slate-500 text-sm">
+          Solensoft Consulting • Données historiques 2023-2024 • Temps réel
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default DashboardV2;

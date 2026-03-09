@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart, ComposedChart, ReferenceLine, Legend } from 'recharts';
 import { TrendingUp, TrendingDown, Users, AlertTriangle, Target, Calendar, Building2, Euro, Bell, Upload, FileDown, Calculator, X, Check, RefreshCw, Sliders, Clock, Settings, ChevronRight, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import Navigation from '../../core/components/Navigation'
 
 // Données Solensoft enrichies avec historique
 const initialMissionsData = [
@@ -578,6 +579,7 @@ export default function DashboardSolensoft() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4 md:p-6" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
+      <Navigation />
       
       {/* Notification */}
       {notification && (

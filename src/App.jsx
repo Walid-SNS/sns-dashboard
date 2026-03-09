@@ -21,13 +21,10 @@ function App() {
 
   return (
     <Routes>
-      {/* Route publique */}
       <Route 
         path="/login" 
         element={user ? <Navigate to="/" replace /> : <Login />} 
       />
-
-      {/* Routes protégées */}
       <Route
         path="/"
         element={
@@ -36,7 +33,6 @@ function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/pilotage"
         element={
@@ -45,7 +41,6 @@ function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/ressources"
         element={
@@ -54,8 +49,6 @@ function App() {
           </ProtectedRoute>
         }
       />
-
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

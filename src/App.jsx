@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './core/hooks/useAuth'
 import ProtectedRoute from './core/components/ProtectedRoute'
 import Login from './pages/Login'
-import Dashboard from './modules/pilotage/Dashboard'
+import Dashboard from './modules/pilotage/DashboardV2'
 import Ressources from './modules/ressources/Ressources'
 
 function App() {
